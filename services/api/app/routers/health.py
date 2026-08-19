@@ -18,13 +18,23 @@ async def health(db: Annotated[AsyncSession, Depends(get_db)]):
     try:
         await db.execute(text("SELECT 1"))
     except Exception as exc:  # noqa: BLE001
-        logger.exception("health check: database unreachable: %s", exc)
+        error_type = type(exc).__name__
+        error_message = str(exc)
+
+        logger.warning(
+            "DATABASE HEALTH ERROR type=%s message=%s",
+            error_type,
+            error_message,
+        )
+
         return JSONResponse(
             status_code=503,
             content={
                 "status": "degraded",
                 "database": "unavailable",
                 "service": "visionstock-api",
+                "error_type": error_type,
+                "error": error_message,
             },
         )
 
