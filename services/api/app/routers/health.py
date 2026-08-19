@@ -17,10 +17,20 @@ router = APIRouter(tags=["system"])
 async def health(db: Annotated[AsyncSession, Depends(get_db)]):
     try:
         await db.execute(text("SELECT 1"))
-    except Exception:  # noqa: BLE001
-        logger.warning("health check: database unreachable")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("health check: database unreachable: %s", exc)
         return JSONResponse(
             status_code=503,
-            content={"status": "degraded", "database": "unavailable", "service": "visionstock-api"},
+            content={
+                "status": "degraded",
+                "database": "unavailable",
+                "service": "visionstock-api",
+            },
         )
-    return {"status": "ok", "database": "ok", "service": "visionstock-api", "version": "0.1.0"}
+
+    return {
+        "status": "ok",
+        "database": "ok",
+        "service": "visionstock-api",
+        "version": "0.1.0",
+    }
