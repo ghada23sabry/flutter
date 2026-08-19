@@ -1,0 +1,38 @@
+[project]
+name = "visionstock-api"
+version = "0.1.0"
+description = "VisionStock AI — multi-tenant supermarket management & AI inventory platform (API)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]",
+    "sqlalchemy[asyncio]==2.0.51",
+    "asyncpg",
+    "alembic==1.19.1",
+    "pydantic-settings",
+    "PyJWT",
+    "passlib[bcrypt]",
+    "email-validator",
+    "httpx>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120

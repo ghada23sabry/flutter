@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+*.log
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node/uv
+uv.lock
+
+# Flutter
+apps/mobile/.dart_tool/
+apps/mobile/.packages
+apps/mobile/build/
+apps/mobile/.flutter-plugins-dependencies
+apps/mobile/ios/Pods/
+apps/mobile/android/.gradle/
+apps/mobile/.idea/
+
+# AI artifacts (large binaries — keep dataset on external storage)
+ai/models/*.pt
+ai/models/*.onnx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Postgres local data
+.pgdata/

@@ -1,0 +1,49 @@
+from app.models.ai import ScanDetection, ScanReconciliation, ScanSession
+from app.models.audit import AuditLog
+from app.models.catalog import Category, Product, ProductVisualProfile, Supplier, SupplierProduct
+from app.models.identity import (
+    Device,
+    DeviceSession,
+    Permission,
+    Role,
+    RolePermission,
+    Store,
+    Tenant,
+    User,
+    UserRole,
+)
+from app.models.inventory import (
+    ExpiryBatch,
+    Inventory,
+    Shelf,
+    ShelfProductMap,
+    StockMovement,
+    Zone,
+)
+
+__all__ = [
+    "AuditLog",
+    "Category",
+    "Device",
+    "DeviceSession",
+    "ExpiryBatch",
+    "Inventory",
+    "Permission",
+    "Product",
+    "ProductVisualProfile",
+    "Role",
+    "RolePermission",
+    "ScanDetection",
+    "ScanReconciliation",
+    "ScanSession",
+    "Shelf",
+    "ShelfProductMap",
+    "StockMovement",
+    "Store",
+    "Supplier",
+    "SupplierProduct",
+    "Tenant",
+    "User",
+    "UserRole",
+    "Zone",
+]

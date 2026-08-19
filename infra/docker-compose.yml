@@ -1,0 +1,25 @@
+services:
+  db:
+    image: postgres:18.4
+    environment:
+      POSTGRES_USER: vs
+      POSTGRES_PASSWORD: vs
+      POSTGRES_DB: visionstock
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vs -d visionstock"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ../services/api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vs:vs@db:5432/visionstock
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
