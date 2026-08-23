@@ -124,4 +124,21 @@ class AiApi {
     );
     return ScanSession.fromJson(json);
   }
+
+  /// Link an unmatched detection to a newly created product.  After linking,
+  /// the server rebuilds the reconciliation row for that product within the
+  /// active scan session.  The caller should re-fetch detections and
+  /// reconciliations to reflect the updated state.
+  Future<void> linkDetection({
+    required StoreInfo store,
+    required String sessionId,
+    required String detectionId,
+    required String productId,
+  }) async {
+    await client.post(
+      '/ai/scans/$sessionId/detections/$detectionId/link',
+      query: {'store_id': store.id},
+      body: {'product_id': productId},
+    );
+  }
 }

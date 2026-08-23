@@ -13,6 +13,7 @@ import '../../../core/widgets/empty_state.dart';
 import '../../../core/widgets/error_state.dart';
 import '../../../core/widgets/loading_state.dart';
 import '../../../core/widgets/status_badge.dart';
+import '../../catalog/data/catalog_api.dart';
 import '../../catalog/data/catalog_models.dart' show Page;
 import '../../ai/data/ai_api.dart';
 import '../../ai/data/ai_models.dart' show AiScanOperation;
@@ -207,6 +208,7 @@ class _InventoryOverviewScreenState extends State<InventoryOverviewScreen> {
         builder: (_) => AiCountScreen(
           aiApi: AiApi(widget.session.apiClient),
           inventoryApi: widget.api,
+          catalogApi: CatalogApi(widget.session.apiClient),
           session: widget.session,
         ),
       ),
@@ -220,6 +222,7 @@ class _InventoryOverviewScreenState extends State<InventoryOverviewScreen> {
         builder: (_) => AiCountScreen(
           aiApi: AiApi(widget.session.apiClient),
           inventoryApi: widget.api,
+          catalogApi: CatalogApi(widget.session.apiClient),
           session: widget.session,
           initialOperation: op,
         ),

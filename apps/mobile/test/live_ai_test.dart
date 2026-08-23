@@ -6,7 +6,7 @@
 //
 // Not part of the default suite. Requires a live backend; run with:
 //   flutter test --dart-define=LIVE_API=true \
-//                --dart-define=API_BASE_URL=http://127.0.0.1:8000 \
+//                --dart-define=API_BASE_URL=http://127.0.0.1:8000
 //                test/live_ai_test.dart
 //
 // No MockClient is used anywhere in this file — every request is real.

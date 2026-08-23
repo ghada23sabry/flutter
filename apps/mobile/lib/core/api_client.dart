@@ -27,55 +27,103 @@ class ApiClient {
 
   final String baseUrl;
   final http.Client _client;
+
+  /// Expose the raw HTTP client for cases where retry-on-401 must be
+  /// bypassed (e.g. the /auth/refresh call itself).
+  http.Client get rawClient => _client;
   String? accessToken;
 
+  /// Callback invoked when a request receives a 401 (expired token).
+  ///
+  /// The callback must perform a token refresh, update [accessToken],
+  /// and return `true` if the refresh succeeded (caller should retry),
+  /// or `false` if it failed (caller should propagate the error).
+  ///
+  /// This is intentionally a simple function callback, not an interface,
+  /// to avoid coupling ApiClient to SessionController.
+  Future<bool> Function()? onUnauthorized;
+
   Future<Map<String, dynamic>> get(String path, {Map<String, dynamic>? query}) async {
-    final response = await _client.get(_uri(path, query), headers: _headers());
-    return _decode(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token);
+      final response = await _client.get(_uri(path, query), headers: headers);
+      return _decode(response);
+    });
   }
 
-  /// GET returning a JSON array (list endpoints like `/categories`).
   Future<List<dynamic>> getList(String path, {Map<String, dynamic>? query}) async {
-    final response = await _client.get(_uri(path, query), headers: _headers());
-    return _decodeList(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token);
+      final response = await _client.get(_uri(path, query), headers: headers);
+      return _decodeList(response);
+    });
   }
 
   Future<Map<String, dynamic>> post(String path, {Object? body, Map<String, dynamic>? query}) async {
-    final response = await _client.post(
-      _uri(path, query),
-      headers: _headers(hasBody: body != null),
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token, hasBody: body != null);
+      final response = await _client.post(
+        _uri(path, query),
+        headers: headers,
+        body: body == null ? null : jsonEncode(body),
+      );
+      return _decode(response);
+    });
   }
 
-  /// POST a raw (non-JSON) payload, e.g. scan-image bytes for `POST /ai/scans/{id}/process`.
   Future<Map<String, dynamic>> postBytes(
     String path, {
     required List<int> bytes,
     Map<String, dynamic>? query,
     String contentType = 'application/octet-stream',
   }) async {
-    final response = await _client.post(
-      _uri(path, query),
-      headers: {..._headers(hasBody: true), 'Content-Type': contentType},
-      body: bytes,
-    );
-    return _decode(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token, hasBody: true);
+      headers['Content-Type'] = contentType;
+      final response = await _client.post(
+        _uri(path, query),
+        headers: headers,
+        body: bytes,
+      );
+      return _decode(response);
+    });
   }
 
   Future<Map<String, dynamic>> patch(String path, {Object? body, Map<String, dynamic>? query}) async {
-    final response = await _client.patch(
-      _uri(path, query),
-      headers: _headers(hasBody: body != null),
-      body: body == null ? null : jsonEncode(body),
-    );
-    return _decode(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token, hasBody: body != null);
+      final response = await _client.patch(
+        _uri(path, query),
+        headers: headers,
+        body: body == null ? null : jsonEncode(body),
+      );
+      return _decode(response);
+    });
   }
 
   Future<Map<String, dynamic>> delete(String path, {Map<String, dynamic>? query}) async {
-    final response = await _client.delete(_uri(path, query), headers: _headers());
-    return _decode(response);
+    return _requestWithRetry((token) async {
+      final headers = _headersForToken(token, hasBody: false);
+      final response = await _client.delete(_uri(path, query), headers: headers);
+      return _decode(response);
+    });
+  }
+
+  /// Executes [fn] with the current [accessToken]. On a 401, invokes
+  /// [onUnauthorized] to refresh the token, then retries [fn] exactly once.
+  Future<T> _requestWithRetry<T>(Future<T> Function(String token) fn) async {
+    final handler = onUnauthorized;
+    try {
+      return await fn(accessToken ?? '');
+    } on ApiException catch (e) {
+      if (!e.isUnauthorized || handler == null) rethrow;
+
+      final refreshed = await handler();
+      if (!refreshed) rethrow;
+
+      // Retry once with the new token.
+      return await fn(accessToken ?? '');
+    }
   }
 
   Uri _uri(String path, Map<String, dynamic>? query) {
@@ -90,8 +138,8 @@ class ApiClient {
     );
   }
 
-  Map<String, String> _headers({bool hasBody = true}) => {
-        if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+  Map<String, String> _headersForToken(String token, {bool hasBody = false}) => {
+        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
         'Accept': 'application/json',
         if (hasBody) 'Content-Type': 'application/json',
       };

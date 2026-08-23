@@ -111,6 +111,24 @@ class CatalogApi {
     }
   }
 
+  /// Look up external product data for an unknown barcode via Open Food Facts.
+  Future<BarcodeEnrichment?> enrichBarcode({
+    required StoreInfo store,
+    required String barcode,
+  }) async {
+    final normalized = barcode.trim();
+    if (normalized.isEmpty) return null;
+    try {
+      final json = await _client.get(
+        '/products/enrich/barcode/$normalized',
+        query: {'store_id': store.id},
+      );
+      return BarcodeEnrichment.fromJson(json);
+    } on ApiException catch (_) {
+      return null;
+    }
+  }
+
   /// Suppliers linked to a product (`GET /products/{id}/suppliers`).
   Future<List<SupplierProductLink>> getProductSuppliers({
     required StoreInfo store,

@@ -1,4 +1,4 @@
-from app.models.ai import ScanDetection, ScanReconciliation, ScanSession
+from app.models.ai import ProductRecognition, ScanDetection, ScanReconciliation, ScanSession
 from app.models.audit import AuditLog
 from app.models.catalog import Category, Product, ProductVisualProfile, Supplier, SupplierProduct
 from app.models.identity import (
@@ -30,6 +30,7 @@ __all__ = [
     "Inventory",
     "Permission",
     "Product",
+    "ProductRecognition",
     "ProductVisualProfile",
     "Role",
     "RolePermission",

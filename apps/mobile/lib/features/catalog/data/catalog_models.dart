@@ -474,3 +474,41 @@ class Page<T> {
 
   bool get hasMore => items.isNotEmpty && page * pageSize < total;
 }
+
+/// External product data retrieved for an unknown barcode.
+class BarcodeEnrichment {
+  const BarcodeEnrichment({
+    required this.barcode,
+    this.name,
+    this.brand,
+    this.category,
+    this.description,
+    this.imageUrl,
+    this.quantity,
+  });
+
+  factory BarcodeEnrichment.fromJson(Map<String, dynamic> json) =>
+      BarcodeEnrichment(
+        barcode: json['barcode'] as String? ?? '',
+        name: json['name'] as String?,
+        brand: json['brand'] as String?,
+        category: json['category'] as String?,
+        description: json['description'] as String?,
+        imageUrl: json['image_url'] as String?,
+        quantity: json['quantity'] as String?,
+      );
+
+  final String barcode;
+  final String? name;
+  final String? brand;
+  final String? category;
+  final String? description;
+  final String? imageUrl;
+  final String? quantity;
+
+  bool get isEmpty =>
+      name == null &&
+      brand == null &&
+      category == null &&
+      description == null;
+}

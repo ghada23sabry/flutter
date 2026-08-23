@@ -1,10 +1,10 @@
 """Fresh-database migration-chain verification (A11.5 + first-release sprint).
 
-Runs `alembic upgrade head` (0001 -> 0008) against an isolated scratch
+Runs `alembic upgrade head` (0001 -> 0009) against an isolated scratch
 database that is created before the run and dropped after it, then asserts the
 resulting schema:
 
-- `alembic_version` == head (0008), single chain, no branches
+- `alembic_version` == head (0009), single chain, no branches
 - every model table exists (identity / catalog / inventory / AI)
 - `scan_sessions.status` server default == 'processing' (migration 0006)
 - `scan_sessions.operation` server default == 'count' (migration 0008)
@@ -15,6 +15,7 @@ resulting schema:
   `owner` + `admin` roles (migration 0005)
 - the partial unique index `uq_stock_movements_scan_session` exists with the
   documented SCAN_SESSION predicate (migration 0008, widened from 0007)
+- `product_recognitions` table exists (migration 0009)
 
 The migrations run in a subprocess (fresh settings cache, same as the CLI),
 so the running test process and its engine are never touched. The scratch DB
@@ -65,6 +66,7 @@ EXPECTED_TABLES = {
     "scan_sessions",
     "scan_detections",
     "scan_reconciliations",
+    "product_recognitions",
 }
 
 AI_PERMISSIONS = {"ai.scan", "ai.reconcile", "ai.confirm", "ai.view"}
@@ -143,7 +145,7 @@ def _run_alembic(db_url: str) -> subprocess.CompletedProcess:
 
 async def _assert_schema(conn: asyncpg.Connection) -> None:
     version = await conn.fetchval("SELECT version_num FROM alembic_version")
-    assert version == "0008", f"expected alembic head 0008, got {version!r}"
+    assert version == "0009", f"expected alembic head 0009, got {version!r}"
 
     tables = {
         row[0]

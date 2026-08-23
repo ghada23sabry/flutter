@@ -5,12 +5,30 @@ import 'package:flutter/foundation.dart';
 
 import 'api/auth_api.dart';
 import 'api_client.dart';
+import 'auth_refresh_handler.dart';
 import 'models/auth_models.dart';
 import 'session_store.dart';
 
 /// Owns the app-wide auth state and its persistence.
 class SessionController extends ChangeNotifier {
-  SessionController({required this._storage, required this._api});
+  SessionController({required this._storage, required this._api}) {
+    final client = _api.client;
+    _refreshHandler = AuthRefreshHandler(
+      baseUrl: client.baseUrl,
+      httpClient: client.rawClient,
+      client: client,
+      storage: _storage,
+      onSessionUpdated: (session) {
+        _current = session;
+        notifyListeners();
+      },
+      onSessionCleared: () {
+        _current = null;
+        _selectedStoreId = null;
+        notifyListeners();
+      },
+    );
+  }
 
   static const String _accessKey = 'auth.access';
   static const String _refreshKey = 'auth.refresh';
@@ -19,6 +37,7 @@ class SessionController extends ChangeNotifier {
 
   final SessionStorage _storage;
   final AuthApi _api;
+  late final AuthRefreshHandler _refreshHandler;
   AuthSession? _current;
   String? _deviceUuid;
   String? _selectedStoreId;
@@ -60,8 +79,8 @@ class SessionController extends ChangeNotifier {
   ///
   /// Builds the session from cached fragments first (so the app opens even
   /// offline), then best-effort re-hydrates permissions/stores from `/auth/me`.
-  /// A 401 triggers refresh-token rotation; any network failure keeps the
-  /// cached session intact.
+  /// A 401 triggers refresh-token rotation via the centralized handler;
+  /// any network failure keeps the cached session intact.
   Future<void> restore() async {
     final access = await _storage.read(_accessKey);
     final refresh = await _storage.read(_refreshKey);
@@ -73,9 +92,12 @@ class SessionController extends ChangeNotifier {
             ? _restoreFromJson(sessionJson, access: access, refresh: refresh)
             : AuthSession.restored(accessToken: access, refreshToken: refresh);
         _api.client.accessToken = _current!.accessToken;
+
+        // Wire the ApiClient retry callback to use the centralized handler.
+        _wireRefreshCallback();
+
         await _hydrate();
       } catch (_) {
-        // Corrupt or unreadable persisted session: clear it, re-login required.
         await _clear();
       }
     }
@@ -93,6 +115,8 @@ class SessionController extends ChangeNotifier {
     await _persist(session);
     _current = session;
     _api.client.accessToken = session.accessToken;
+    _refreshHandler.reset();
+    _wireRefreshCallback();
     if (session.stores.isNotEmpty) _selectedStoreId ??= session.stores.first.id;
     notifyListeners();
     return session;
@@ -108,10 +132,11 @@ class SessionController extends ChangeNotifier {
     _current = null;
     _selectedStoreId = null;
     _api.client.accessToken = null;
+    _api.client.onUnauthorized = null;
     notifyListeners();
   }
 
-  /// Refresh permissions/stores (and tokens if needed) after restore.
+  /// Refresh permissions/stores after restore, using the centralized handler.
   Future<void> _hydrate() async {
     final session = _current;
     if (session == null) return;
@@ -125,28 +150,54 @@ class SessionController extends ChangeNotifier {
       await _persist(_current!);
     } on ApiException catch (e) {
       if (e.isUnauthorized) {
-        try {
-          final rotated = await _api.refresh(session.refreshToken);
-          _current = _current!.copyWith(
-            accessToken: rotated.accessToken,
-            refreshToken: rotated.refreshToken,
-          );
-          _api.client.accessToken = rotated.accessToken;
-          final me = await _api.me();
-          _current = _current!.copyWith(
-            user: me.user,
-            permissions: me.permissions,
-            stores: me.stores,
-          );
-          await _persist(_current!);
-        } catch (_) {
-          await _clear();
+        // Delegate to the centralized refresh handler.
+        final refreshed = await _refreshHandler.execute(
+          currentSession: session,
+          onUnauthorized: true,
+        );
+        if (refreshed) {
+          try {
+            final me = await _api.me();
+            _current = _current!.copyWith(
+              user: me.user,
+              permissions: me.permissions,
+              stores: me.stores,
+            );
+            await _persist(_current!);
+          } catch (_) {
+            // Keep whatever the refresh handler updated.
+          }
         }
+        // If refresh failed, the handler already cleared the session.
       }
       // Other failures keep the cached session.
     } catch (_) {
       // Network errors keep the cached session.
     }
+  }
+
+  /// Proactively refresh the token if it may have expired.
+  ///
+  /// Called when the app resumes from background. If the refresh handler
+  /// hasn't already failed, this performs a best-effort refresh so that
+  /// the first authenticated request after resume succeeds immediately.
+  Future<void> refreshOnResume() async {
+    final session = _current;
+    if (session == null) return;
+    if (_refreshHandler.refreshFailed) return;
+    await _refreshHandler.execute(
+      currentSession: session,
+      onUnauthorized: true,
+    );
+  }
+
+  /// Wire the ApiClient's [onUnauthorized] callback to the centralized handler.
+  void _wireRefreshCallback() {
+    _api.client.onUnauthorized = () async {
+      final session = _current;
+      if (session == null) return false;
+      return _refreshHandler.execute(currentSession: session);
+    };
   }
 
   AuthSession _restoreFromJson(String sessionJson, {required String access, required String refresh}) {

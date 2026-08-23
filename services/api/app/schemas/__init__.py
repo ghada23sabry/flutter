@@ -1,5 +1,6 @@
 from app.schemas.ai import (
     DetectionIn,
+    DetectionLink,
     DetectionOut,
     DetectionStatus,
     ReconciliationOut,
@@ -26,6 +27,7 @@ from app.schemas.auth import (
 )
 from app.schemas.catalog import (
     ActionResponse,
+    BarcodeEnrichment,
     CategoryIn,
     CategoryOut,
     CategoryUpdate,
@@ -67,10 +69,12 @@ from app.schemas.inventory import (
 __all__ = [
     "ActionResponse",
     "AdjustmentIn",
+    "BarcodeEnrichment",
     "CategoryIn",
     "CategoryOut",
     "CategoryUpdate",
     "DetectionIn",
+    "DetectionLink",
     "DetectionOut",
     "DetectionStatus",
     "DeviceInfo",

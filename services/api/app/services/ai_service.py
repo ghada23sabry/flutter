@@ -43,10 +43,12 @@ from app.ai.contract import DetectedItem, VisionContext
 from app.ai.vision_port import AIVisionPort
 from app.config import get_settings
 from app.core.audit import write_audit
+from app.core.barcode_enrichment import enrich_barcode_off
 from app.core.errors import CODE_CONFLICT, CODE_INTERNAL_ERROR, CODE_NOT_FOUND, CODE_VALIDATION_ERROR, AppError
 from app.models import (
     Inventory,
     Product,
+    ProductRecognition,
     ScanDetection,
     ScanReconciliation,
     ScanSession,
@@ -108,8 +110,31 @@ OPERATION_MOVEMENT_NOTES = {
 class ScanProcessingFailed(AppError):
     """Raised after a failed vision call; the session is persisted as FAILED."""
 
-    def __init__(self) -> None:
-        super().__init__(CODE_INTERNAL_ERROR, "Vision processing failed", 500)
+    def __init__(self, detail: str | None = None) -> None:
+        message = "Vision processing failed"
+        if detail:
+            message = f"Vision processing failed: {detail}"
+        super().__init__(CODE_INTERNAL_ERROR, message, 500)
+
+
+def _describe_vision_error(exc: Exception) -> str:
+    """User-friendly one-liner for a vision provider failure."""
+    import httpx  # local import to avoid circular dependency at module level
+
+    if isinstance(exc, httpx.TimeoutException):
+        return "the vision API timed out — try again or use a smaller image"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 400:
+            return "the vision API rejected the request — check the image format"
+        if status == 403:
+            return "vision API access denied — invalid or expired API key"
+        if status == 429:
+            return "vision API rate limit exceeded — try again in a moment"
+        if status >= 500:
+            return f"vision API server error (HTTP {status}) — try again later"
+        return f"vision API returned HTTP {status}"
+    return "an unexpected error calling the vision API"
 
 
 def _utcnow() -> datetime:
@@ -198,7 +223,7 @@ async def process_scan(
         session.completed_at = _utcnow()
         session.completed_by = actor_id
         await db.commit()
-        raise ScanProcessingFailed() from exc
+        raise ScanProcessingFailed(_describe_vision_error(exc)) from exc
 
     resolved: list[tuple[uuid.UUID | None, DetectedItem, str]] = []
     for item in items:
@@ -521,6 +546,36 @@ async def confirm_scan_session(
                 }
             )
 
+        # Step 7: write recognition memory for every confirmed detection
+        # that has both a barcode and a product.  This lets future scans
+        # skip external enrichment and name matching for known barcodes.
+        barcode_dets = (
+            await db.execute(
+                select(ScanDetection).where(
+                    ScanDetection.session_id == session_id,
+                    ScanDetection.tenant_id == tenant_id,
+                    ScanDetection.store_id == store_id,
+                    ScanDetection.detected_barcode.isnot(None),
+                    ScanDetection.product_id.isnot(None),
+                )
+            )
+        ).scalars().all()
+        seen_barcodes: set[str] = set()
+        for det in barcode_dets:
+            bc = normalize_barcode(det.detected_barcode)
+            if bc in seen_barcodes:
+                continue
+            seen_barcodes.add(bc)
+            await _upsert_recognition(
+                db,
+                tenant_id=tenant_id,
+                store_id=store_id,
+                barcode=bc,
+                product_id=det.product_id,
+                source="user_confirm",
+                actor_id=actor_id,
+            )
+
         session.status = SESSION_STATUS_CONFIRMED
         await write_audit(
             db,
@@ -570,16 +625,69 @@ def _detection_status(item: DetectedItem, product_id: uuid.UUID | None) -> str:
     return DETECTION_ACCEPTED
 
 
+async def _upsert_recognition(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    store_id: uuid.UUID,
+    barcode: str,
+    product_id: uuid.UUID,
+    source: str,
+    actor_id: uuid.UUID | None,
+) -> None:
+    """Write (or bump) a barcode→product recognition memory row.
+
+    Called on confirm and link to remember confirmed mappings for future scans.
+    Upserts on the unique constraint (tenant, store, barcode): if the mapping
+    already exists, hit_count is incremented and the timestamp is refreshed.
+    """
+    existing = (
+        await db.execute(
+            select(ProductRecognition).where(
+                ProductRecognition.tenant_id == tenant_id,
+                ProductRecognition.store_id == store_id,
+                ProductRecognition.barcode == barcode,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.product_id = product_id
+        existing.source = source
+        existing.hit_count += 1
+        if actor_id is not None:
+            existing.created_by = actor_id
+    else:
+        db.add(
+            ProductRecognition(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                barcode=barcode,
+                product_id=product_id,
+                source=source,
+                created_by=actor_id,
+            )
+        )
+
+
 async def _resolve_product(
     db: AsyncSession, tenant_id: uuid.UUID, store_id: uuid.UUID, item: DetectedItem
 ) -> Product | None:
     """Resolve a detection to a product, strictly scoped to (tenant, store).
 
-    Priority: barcode first (more specific), then SKU, then visual/name match.
+    Priority (deterministic, most-specific-first):
+    1. Local barcode exact match (catalog)
+    2. Recognition memory (previously confirmed barcode→product mapping)
+    3. External barcode enrichment (Open Food Facts) → name match
+    4. Local SKU exact match
+    5. Visual/name match from vision metadata
+    6. Unknown product workflow (returns None → user creates product)
+
     Returns None when unresolved — the caller flags the detection for review.
     """
     if item.detected_barcode is not None:
         normalized = normalize_barcode(item.detected_barcode)
+
+        # 1. Local barcode exact match (fastest, most deterministic)
         product = (
             await db.execute(
                 select(Product).where(
@@ -592,6 +700,47 @@ async def _resolve_product(
         if product is not None:
             return product
 
+        # 2. Recognition memory — a previously confirmed barcode→product
+        #    mapping from the same (tenant, store).  This is a fast local
+        #    DB lookup that avoids a network call.  Scoped to (tenant, store)
+        #    so the same barcode can map to different products at different
+        #    stores.  If the remembered product was deactivated, fall through.
+        memory = (
+            await db.execute(
+                select(ProductRecognition).where(
+                    ProductRecognition.tenant_id == tenant_id,
+                    ProductRecognition.store_id == store_id,
+                    ProductRecognition.barcode == normalized,
+                )
+            )
+        ).scalar_one_or_none()
+        if memory is not None:
+            product = (
+                await db.execute(
+                    select(Product).where(
+                        Product.id == memory.product_id,
+                        Product.tenant_id == tenant_id,
+                        Product.store_id == store_id,
+                        Product.status == "active",
+                    )
+                )
+            ).scalar_one_or_none()
+            if product is not None:
+                memory.hit_count += 1
+                return product
+
+        # 3. External barcode enrichment — when the local catalog doesn't
+        #    contain this barcode, query Open Food Facts.  If the external
+        #    source returns a name, use it for the name-match step below
+        #    (step 5).  We never auto-create products here; the caller can
+        #    decide whether to surface the enriched data to the user.
+        off = await enrich_barcode_off(normalized)
+        if off.has_name:
+            product = await _resolve_product_by_name(db, tenant_id, store_id, off.name)
+            if product is not None:
+                return product
+
+    # 4. Local SKU exact match
     if item.detected_sku is not None:
         sku = item.detected_sku.strip()
         product = (
@@ -688,3 +837,187 @@ def _aggregate(resolved: list[tuple[uuid.UUID | None, DetectedItem, str]]) -> di
             continue
         totals[product_id] = totals.get(product_id, Decimal(0)) + item.quantity
     return totals
+
+
+# ── Detection → product linking ────────────────────────────────────────────
+
+
+async def link_detection_to_product(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    store_id: uuid.UUID,
+    session_id: uuid.UUID,
+    detection_id: uuid.UUID,
+    product_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+) -> ScanDetection:
+    """Link an unmatched detection to a product and rebuild reconciliation.
+
+    Called after the user creates a product from an AI detection's metadata.
+    The detection's ``product_id`` is set, its status is re-evaluated against
+    the confidence gate, and the affected reconciliation row is rebuilt — all
+    within a single transactional unit that uses the same aggregation and
+    variance logic as the original ``process_scan`` pipeline.
+
+    Hard rules:
+    - The scan session must be in COMPLETED or NEEDS_REVIEW (i.e. open for
+      human review).  PROCESSING (not yet scanned), FAILED, CANCELLED and
+      already-CONFIRMED sessions are rejected with 409.
+    - The detection must belong to the supplied session, tenant and store.
+    - The target product must exist and be accessible within (tenant, store).
+    - Linking a detection already linked to the same product is idempotent.
+    - Linking a detection already linked to a *different* product is rejected
+      with 409 (no silent overwrite without explicit architecture support).
+    - Inventory is never touched — only ``confirm_scan_session`` may mutate
+      stock, and this function only writes to detections, reconciliations and
+      the session status.
+    """
+    # ── 1. Lock session ───────────────────────────────────────────────────
+    session = (
+        await db.execute(
+            select(ScanSession)
+            .where(
+                ScanSession.id == session_id,
+                ScanSession.tenant_id == tenant_id,
+                ScanSession.store_id == store_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise AppError(CODE_NOT_FOUND, "Scan session not found", 404)
+    if session.status not in CONFIRMABLE_STATUSES:
+        raise AppError(CODE_CONFLICT, "Scan session is not open for linking in its current state", 409)
+
+    # ── 2. Validate detection ─────────────────────────────────────────────
+    detection = (
+        await db.execute(
+            select(ScanDetection)
+            .where(
+                ScanDetection.id == detection_id,
+                ScanDetection.session_id == session_id,
+                ScanDetection.tenant_id == tenant_id,
+                ScanDetection.store_id == store_id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if detection is None:
+        raise AppError(CODE_NOT_FOUND, "Detection not found", 404)
+
+    # ── 3. Idempotency / reassignment guard ───────────────────────────────
+    if detection.product_id is not None:
+        if detection.product_id == product_id:
+            await db.refresh(detection)
+            return detection
+        raise AppError(
+            CODE_CONFLICT,
+            "Detection is already linked to a different product",
+            409,
+        )
+
+    # ── 4. Validate product scope ─────────────────────────────────────────
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == product_id,
+                Product.tenant_id == tenant_id,
+                Product.store_id == store_id,
+                Product.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if product is None:
+        raise AppError(CODE_NOT_FOUND, "Product not found or not accessible in this store", 404)
+
+    # ── 5. Link ───────────────────────────────────────────────────────────
+    detection.product_id = product_id
+    detection.status = _detection_status(detection, product_id)
+
+    # Step 5a: write recognition memory if this detection has a barcode.
+    if detection.detected_barcode is not None:
+        await _upsert_recognition(
+            db,
+            tenant_id=tenant_id,
+            store_id=store_id,
+            barcode=normalize_barcode(detection.detected_barcode),
+            product_id=product_id,
+            source="link",
+            actor_id=actor_id,
+        )
+
+    # ── 6. Rebuild reconciliation for this product ────────────────────────
+    all_dets = (
+        await db.execute(
+            select(ScanDetection).where(
+                ScanDetection.session_id == session_id,
+                ScanDetection.tenant_id == tenant_id,
+                ScanDetection.store_id == store_id,
+            )
+        )
+    ).scalars().all()
+
+    product_dets = [d for d in all_dets if d.product_id == product_id]
+    detected_quantity = sum(
+        (d.quantity_detected for d in product_dets), start=Decimal(0)
+    )
+
+    inventory = (
+        await db.execute(
+            select(Inventory).where(
+                Inventory.store_id == store_id,
+                Inventory.product_id == product_id,
+            )
+        )
+    ).scalar_one_or_none()
+    system_quantity = inventory.quantity if inventory is not None else Decimal(0)
+    variance = _variance_for(session.operation, detected_quantity, system_quantity)
+
+    existing_rec = (
+        await db.execute(
+            select(ScanReconciliation).where(
+                ScanReconciliation.session_id == session_id,
+                ScanReconciliation.product_id == product_id,
+                ScanReconciliation.tenant_id == tenant_id,
+                ScanReconciliation.store_id == store_id,
+            ).with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if existing_rec is not None:
+        existing_rec.detected_quantity = detected_quantity
+        existing_rec.variance = variance
+        existing_rec.status = RECONCILIATION_NO_CHANGE if variance == 0 else RECONCILIATION_NEEDS_REVIEW
+        existing_rec.resolution = None
+        existing_rec.confirmed_by = None
+        existing_rec.confirmed_at = None
+    else:
+        db.add(
+            ScanReconciliation(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                session_id=session.id,
+                product_id=product_id,
+                detected_quantity=detected_quantity,
+                system_quantity=system_quantity,
+                variance=variance,
+                status=RECONCILIATION_NO_CHANGE if variance == 0 else RECONCILIATION_NEEDS_REVIEW,
+            )
+        )
+
+    # ── 7. Recalculate session status ─────────────────────────────────────
+    has_unresolved = any(d.product_id is None for d in all_dets)
+    has_low_confidence = any(
+        d.product_id is not None
+        and d.method != "manual"
+        and (d.confidence is None or d.confidence < Decimal(str(get_settings().ai_confidence_threshold)))
+        for d in all_dets
+    )
+    session.status = (
+        SESSION_STATUS_NEEDS_REVIEW if has_unresolved or has_low_confidence else SESSION_STATUS_COMPLETED
+    )
+
+    await db.commit()
+    await db.refresh(detection)
+    return detection

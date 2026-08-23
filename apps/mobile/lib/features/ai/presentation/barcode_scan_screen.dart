@@ -3,9 +3,12 @@
 /// Uses [MobileScannerController] with `returnImage: false` (barcode-only).
 /// Camera ownership is exclusive — this screen does not share the camera
 /// with [CameraCaptureScreen].
+///
+/// Lifecycle: the controller is created in [initState] with `autoStart: true`
+/// (the default). The [MobileScanner] widget handles attaching the native
+/// camera surface and starting the scan. Calling `controller.start()` before
+/// the widget is in the tree causes `controllerNotAttached` — never do that.
 library;
-
-import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -24,54 +27,17 @@ class BarcodeScanScreen extends StatefulWidget {
 
 class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   MobileScannerController? _controller;
-  bool _initializing = true;
   String? _error;
   bool _popped = false;
 
   @override
   void initState() {
     super.initState();
-    _initScanner();
-  }
-
-  Future<void> _initScanner() async {
-    try {
-      final controller = MobileScannerController(
-        autoStart: false,
-        facing: CameraFacing.back,
-        detectionSpeed: DetectionSpeed.normal,
-        returnImage: false, // barcode-only — no image bytes
-      );
-      await controller.start();
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-      setState(() {
-        _controller = controller;
-        _initializing = false;
-      });
-    } on MobileScannerException catch (e) {
-      if (!mounted) return;
-      final message = switch (e.errorCode) {
-        MobileScannerErrorCode.permissionDenied =>
-          'Camera permission was denied. Enable camera access in device settings.',
-        MobileScannerErrorCode.unsupported =>
-          'Barcode scanning is not supported on this device.',
-        _ => 'Scanner could not be started (${e.errorCode}).',
-      };
-      setState(() {
-        _error = message;
-        _initializing = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = 'Unexpected scanner error: $e';
-          _initializing = false;
-        });
-      }
-    }
+    _controller = MobileScannerController(
+      facing: CameraFacing.back,
+      detectionSpeed: DetectionSpeed.normal,
+      returnImage: false,
+    );
   }
 
   @override
@@ -101,15 +67,17 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   Widget _buildBody() {
     if (_error != null) return _buildError();
-    if (_initializing || _controller == null) {
+    final controller = _controller;
+    if (controller == null) {
       return const Center(child: CircularProgressIndicator());
     }
     return Column(
       children: [
         Expanded(
           child: MobileScanner(
-            controller: _controller!,
+            controller: controller,
             onDetect: _onDetect,
+            errorBuilder: _onScannerError,
           ),
         ),
         Padding(
@@ -139,6 +107,23 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     try {
       await controller.toggleTorch();
     } catch (_) {}
+  }
+
+  Widget _onScannerError(
+    BuildContext context,
+    MobileScannerException error,
+  ) {
+    final message = switch (error.errorCode) {
+      MobileScannerErrorCode.permissionDenied =>
+        'Camera permission was denied. Enable camera access in device settings.',
+      MobileScannerErrorCode.unsupported =>
+        'Barcode scanning is not supported on this device.',
+      _ => 'Scanner could not be started (${error.errorCode}).',
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _error == null) setState(() => _error = message);
+    });
+    return const Center(child: CircularProgressIndicator());
   }
 
   Widget _buildError() {

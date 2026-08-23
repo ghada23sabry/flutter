@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Annotated
 
@@ -7,11 +8,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit
+from app.core.barcode_enrichment import enrich_barcode_off
 from app.core.db import get_db
 from app.core.errors import CODE_CONFLICT, CODE_NOT_FOUND, AppError
 from app.core.security import AuthContext, require_permission
 from app.models import Category, Product, Supplier, SupplierProduct
 from app.schemas import (
+    BarcodeEnrichment,
     Page,
     ProductIn,
     ProductOut,
@@ -25,6 +28,8 @@ from app.services.catalog_service import (
     normalize_barcode,
     require_store,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/products", tags=["catalog"])
 
@@ -187,6 +192,36 @@ async def lookup_by_barcode(
     if product is None:
         raise AppError(CODE_NOT_FOUND, "Product not found", 404)
     return _product_out(product, await _category_name(db, product.category_id))
+
+
+# ── Barcode enrichment (must precede /{product_id} catch-all) ──────────────
+
+
+@router.get("/enrich/barcode/{barcode}", response_model=BarcodeEnrichment)
+async def enrich_barcode(
+    barcode: str,
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_VIEW))],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    """Look up product information for an unknown barcode via Open Food Facts.
+
+    Returns whatever public data is available; never returns errors for
+    missing products (just empty fields).  The caller decides what to do
+    with partial data.
+    """
+    require_store(ctx, store_id)
+    normalized = normalize_barcode(barcode)
+    if not normalized:
+        raise AppError(CODE_NOT_FOUND, "Invalid barcode", 404)
+
+    off = await enrich_barcode_off(normalized)
+    return BarcodeEnrichment(
+        barcode=off.barcode,
+        name=off.name,
+        brand=off.brand,
+        category=off.category,
+        description=off.description,
+    )
 
 
 @router.get("/{product_id}", response_model=ProductOut)

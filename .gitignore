@@ -36,3 +36,17 @@ Thumbs.db
 
 # Postgres local data
 .pgdata/
+
+# Local credentials
+services/api/login.json
+
+# Temp scripts / debug artifacts
+services/api/_*.py
+services/api/main.py
+_test_shelf.jpg
+*.zip
+*.hprof*
+
+# Backups
+apps/mobile/.backup_*
+

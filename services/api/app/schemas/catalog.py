@@ -177,3 +177,15 @@ class SupplierProductOut(BaseModel):
     is_preferred: bool
     created_at: datetime
     updated_at: datetime
+
+
+class BarcodeEnrichment(BaseModel):
+    """External product data retrieved for an unknown barcode."""
+
+    barcode: str
+    name: str | None = None
+    brand: str | None = None
+    category: str | None = None
+    description: str | None = None
+    image_url: str | None = None
+    quantity: str | None = None

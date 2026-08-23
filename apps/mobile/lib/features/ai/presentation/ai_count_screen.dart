@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -37,6 +38,7 @@ class AiCountScreen extends StatefulWidget {
     super.key,
     required this.aiApi,
     required this.inventoryApi,
+    required this.catalogApi,
     required this.session,
     this.imageSource,
     this.initialOperation,
@@ -44,6 +46,7 @@ class AiCountScreen extends StatefulWidget {
 
   final AiApi aiApi;
   final InventoryApi inventoryApi;
+  final CatalogApi catalogApi;
   final SessionController session;
 
   /// Deterministic M4-A test-image source; M4-B swaps in a camera source.
@@ -307,15 +310,13 @@ class _AiCountScreenState extends State<AiCountScreen> {
         });
         return;
       }
-      setState(() {
-        _session = processed;
-        _state = processed.isNeedsReview
-            ? AiScanUiState.needsReview
-            : AiScanUiState.loaded;
-      });
+      // Keep showing the processing spinner while we fetch detections and
+      // reconciliations. Without this, the results view renders with empty
+      // lists for the ~1-3 s it takes _loadResults to complete.
+      setState(() => _session = processed);
       await _loadResults();
     } on ApiException catch (e) {
-      _fail(e.message);
+      _fail(kDebugMode ? '[${e.statusCode}] ${e.message}' : e.message);
     } catch (_) {
       _fail('Cannot reach the server. Check your connection.');
     }
@@ -352,7 +353,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
             : AiScanUiState.readyToConfirm,
       );
     } on ApiException catch (e) {
-      _fail(e.message);
+      _fail(kDebugMode ? '[${e.statusCode}] ${e.message}' : e.message);
     } catch (_) {
       _fail('Cannot reach the server. Check your connection.');
     }
@@ -398,6 +399,81 @@ class _AiCountScreenState extends State<AiCountScreen> {
       _reconciliations = const [];
       _error = null;
     });
+  }
+
+  /// Navigate to the product creation screen with data pre-filled from an
+  /// AI detection's metadata.  After the user creates the product, the
+  /// detection is linked to it server-side and the session state is refreshed
+  /// so the newly created product participates in reconciliation and
+  /// confirmation.
+  Future<void> _createProductFromDetection(ScanDetection detection) async {
+    final store = widget.session.selectedStore;
+    if (store == null) return;
+    final data = UnknownProductData(
+      name: detection.metaName ?? '',
+      barcode: detection.detectedBarcode,
+      sku: detection.detectedSku,
+      category: detection.metaCategory,
+      brand: detection.metaBrand,
+      description: detection.metaDescription,
+      detectedQuantity: detection.quantityDetected,
+    );
+    final result = await Navigator.of(context).push<UnknownProductCreated>(
+      MaterialPageRoute(
+        builder: (_) => UnknownProductScreen(
+          catalogApi: widget.catalogApi,
+          store: store,
+          detected: data,
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+
+    // Product created — now link the detection to it server-side.
+    final session = _session;
+    if (session == null) return;
+
+    setState(() {
+      _state = AiScanUiState.processing;
+      _error = null;
+    });
+
+    try {
+      await widget.aiApi.linkDetection(
+        store: store,
+        sessionId: session.id,
+        detectionId: detection.id,
+        productId: result.product.id,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _state = AiScanUiState.needsReview);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Product created but could not link to scan: ${e.message}. '
+            'You can retry or continue reviewing other detections.',
+          ),
+        ),
+      );
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _state = AiScanUiState.needsReview);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Product created but could not link to scan. '
+            'Check your connection and retry.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Link succeeded — refresh detections and reconciliations.
+    if (!mounted) return;
+    await _loadResults();
   }
 
   /// Open the real camera and route a captured frame through the normal
@@ -1239,7 +1315,12 @@ class _AiCountScreenState extends State<AiCountScreen> {
                       for (final detection in _detections)
                         Padding(
                           padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                          child: _DetectionTile(detection: detection),
+                          child: _DetectionTile(
+                            detection: detection,
+                            onCreateProduct: detection.isUnmatched
+                                ? () => _createProductFromDetection(detection)
+                                : null,
+                          ),
                         ),
                     ],
                   ),
@@ -1486,47 +1567,83 @@ class _AiCountScreenState extends State<AiCountScreen> {
 }
 
 class _DetectionTile extends StatelessWidget {
-  const _DetectionTile({required this.detection});
+  const _DetectionTile({required this.detection, this.onCreateProduct});
 
   final ScanDetection detection;
+  final VoidCallback? onCreateProduct;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final subtitle = _buildSubtitle();
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.md),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  detection.referenceLabel,
-                  style: Theme.of(context).textTheme.bodyLarge,
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      detection.referenceLabel,
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    if (subtitle.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.xs),
+                        child: Text(
+                          subtitle,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  '${DetectionMethod.label(detection.method)} · '
-                  '${AppFormat.qty(detection.quantityDetected)} unit(s)'
-                  '${detection.confidence != null ? ' · ${(detection.confidence! * 100).round()}% conf.' : ''}',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              StatusBadge(
+                label: DetectionStatus.label(detection.status),
+                status: detection.isAccepted
+                    ? AppStatus.success
+                    : AppStatus.warning,
+              ),
+            ],
+          ),
+          if (detection.isUnmatched && onCreateProduct != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: ValueKey('create-product-${detection.id}'),
+                onPressed: onCreateProduct,
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: const Text('Create Product from Detection'),
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          StatusBadge(
-            label: DetectionStatus.label(detection.status),
-            status: detection.isAccepted
-                ? AppStatus.success
-                : AppStatus.warning,
-          ),
+          ],
         ],
       ),
     );
+  }
+
+  String _buildSubtitle() {
+    final parts = <String>[];
+    parts.add(DetectionMethod.label(detection.method));
+    parts.add('${AppFormat.qty(detection.quantityDetected)} unit(s)');
+    if (detection.confidence != null) {
+      parts.add('${(detection.confidence! * 100).round()}% conf.');
+    }
+    if (detection.metaBrand != null && detection.metaBrand!.isNotEmpty) {
+      parts.add(detection.metaBrand!);
+    }
+    if (detection.metaCategory != null && detection.metaCategory!.isNotEmpty) {
+      parts.add(detection.metaCategory!);
+    }
+    return parts.join(' · ');
   }
 }
 

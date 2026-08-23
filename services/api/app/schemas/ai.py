@@ -76,9 +76,23 @@ class DetectionOut(BaseModel):
     meta: dict | None
     created_by: uuid.UUID | None
     created_at: datetime
+    product_name: str | None = None
+    product_sku: str | None = None
+    product_barcode: str | None = None
 
 
 # ── Reconciliations ──────────────────────────────────────────────────────────
+
+
+class DetectionLink(BaseModel):
+    """Link an unmatched detection to an existing product.
+
+    The product must exist within the same (tenant, store) scope as the scan
+    session.  The server validates ownership, idempotency, and rebuilds the
+    affected reconciliation row atomically.
+    """
+
+    product_id: uuid.UUID
 
 
 class ReconciliationUpdate(BaseModel):

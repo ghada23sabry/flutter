@@ -17,6 +17,7 @@ import 'package:visionstock_mobile/features/ai/data/ai_api.dart';
 import 'package:visionstock_mobile/features/ai/data/ai_models.dart';
 import 'package:visionstock_mobile/features/ai/data/mock_scan_image.dart';
 import 'package:visionstock_mobile/features/ai/presentation/ai_count_screen.dart';
+import 'package:visionstock_mobile/features/catalog/data/catalog_api.dart';
 import 'package:visionstock_mobile/features/inventory/data/inventory_api.dart';
 
 const _aiPermissions = [
@@ -373,6 +374,7 @@ Future<_AiConfig> _openAiScreen(
                   builder: (_) => AiCountScreen(
                     aiApi: AiApi(apiClient),
                     inventoryApi: InventoryApi(apiClient),
+                    catalogApi: CatalogApi(apiClient),
                     session: session,
                     imageSource: const _FakeImageSource(),
                     initialOperation: initialOperation,
@@ -875,7 +877,7 @@ void main() {
 
     expect(find.text('Scan failed'), findsOneWidget);
     expect(
-      find.text('You do not have permission to start a scan'),
+      find.textContaining('You do not have permission to start a scan'),
       findsOneWidget,
     );
   });
@@ -890,7 +892,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Scan failed'), findsOneWidget);
-    expect(find.text('Scan session not found'), findsOneWidget);
+    expect(find.textContaining('Scan session not found'), findsOneWidget);
   });
 
   // ── Review: override / ignore ────────────────────────────────────────────

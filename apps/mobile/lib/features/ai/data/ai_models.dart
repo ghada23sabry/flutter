@@ -148,6 +148,9 @@ class ScanDetection {
     this.meta,
     this.imageKey,
     required this.createdAt,
+    this.productName,
+    this.productSku,
+    this.productBarcode,
   });
 
   factory ScanDetection.fromJson(Map<String, dynamic> json) => ScanDetection(
@@ -165,6 +168,9 @@ class ScanDetection {
         : null,
     imageKey: json['image_key'] as String?,
     createdAt: _toDateTime(json['created_at']),
+    productName: json['product_name'] as String?,
+    productSku: json['product_sku'] as String?,
+    productBarcode: json['product_barcode'] as String?,
   );
 
   final String id;
@@ -179,20 +185,30 @@ class ScanDetection {
   final Map<String, dynamic>? meta;
   final String? imageKey;
   final DateTime createdAt;
+  final String? productName;
+  final String? productSku;
+  final String? productBarcode;
 
   bool get isAccepted => status == DetectionStatus.accepted;
+  bool get isUnmatched => productId == null;
 
-  /// Best human label for what was detected (barcode → sku → product → fallback).
+  /// AI-detected name from vision metadata.
+  String? get metaName => meta?['name'] as String?;
+  String? get metaBrand => meta?['brand'] as String?;
+  String? get metaCategory => meta?['category'] as String?;
+  String? get metaDescription => meta?['description'] as String?;
+
+  /// Best human label: resolved product → detected barcode → detected SKU → AI name → fallback.
   String get referenceLabel {
+    if (productName != null && productName!.isNotEmpty) return productName!;
     if (detectedBarcode != null && detectedBarcode!.isNotEmpty) {
       return detectedBarcode!;
     }
     if (detectedSku != null && detectedSku!.isNotEmpty) {
       return detectedSku!;
     }
-    return productId != null && productId!.isNotEmpty
-        ? 'Product $productId'
-        : 'Unmatched item';
+    if (metaName != null && metaName!.isNotEmpty) return metaName!;
+    return 'Unmatched item';
   }
 }
 

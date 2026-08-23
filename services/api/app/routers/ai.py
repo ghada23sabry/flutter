@@ -31,6 +31,7 @@ from app.core.errors import CODE_NOT_FOUND, CODE_VALIDATION_ERROR, AppError
 from app.core.security import AuthContext, require_permission
 from app.models import Product, ScanDetection, ScanReconciliation, ScanSession
 from app.schemas import (
+    DetectionLink,
     DetectionOut,
     ReconciliationOut,
     ReconciliationUpdate,
@@ -40,6 +41,7 @@ from app.schemas import (
 from app.services.ai_service import (
     confirm_scan_session,
     create_scan_session,
+    link_detection_to_product,
     process_scan,
     update_reconciliation,
 )
@@ -143,7 +145,8 @@ async def get_scan_detections(
     await _get_scoped_session(db, ctx, store_id, session_id)
     rows = (
         await db.execute(
-            select(ScanDetection)
+            select(ScanDetection, Product)
+            .outerjoin(Product, ScanDetection.product_id == Product.id)
             .where(
                 ScanDetection.session_id == session_id,
                 ScanDetection.tenant_id == ctx.tenant.id,
@@ -151,8 +154,51 @@ async def get_scan_detections(
             )
             .order_by(ScanDetection.created_at)
         )
-    ).scalars().all()
-    return [DetectionOut.model_validate(d) for d in rows]
+    ).all()
+    return [
+        DetectionOut.model_validate(det).model_copy(
+            update={
+                "product_name": product.name if product else None,
+                "product_sku": product.sku if product else None,
+                "product_barcode": product.barcode if product else None,
+            }
+        )
+        for det, product in rows
+    ]
+
+
+@router.post(
+    "/scans/{session_id}/detections/{detection_id}/link",
+    response_model=DetectionOut,
+)
+async def link_detection(
+    session_id: uuid.UUID,
+    detection_id: uuid.UUID,
+    body: DetectionLink,
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_RECONCILE))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    require_store(ctx, store_id)
+    detection = await link_detection_to_product(
+        db,
+        tenant_id=ctx.tenant.id,
+        store_id=store_id,
+        session_id=session_id,
+        detection_id=detection_id,
+        product_id=body.product_id,
+        actor_id=ctx.user.id,
+    )
+    product = (
+        await db.execute(select(Product).where(Product.id == detection.product_id))
+    ).scalar_one_or_none()
+    return DetectionOut.model_validate(detection).model_copy(
+        update={
+            "product_name": product.name if product else None,
+            "product_sku": product.sku if product else None,
+            "product_barcode": product.barcode if product else None,
+        }
+    )
 
 
 @router.get("/scans/{session_id}/reconciliations", response_model=list[ReconciliationOut])

@@ -149,3 +149,52 @@ class ScanReconciliation(Base):
 
     session: Mapped[ScanSession] = relationship(back_populates="reconciliations")
     product: Mapped["Product"] = relationship()  # noqa: F821 - resolved via catalog model
+
+
+class ProductRecognition(Base):
+    """Barcode → product mapping confirmed through the AI scan workflow.
+
+    Written on confirmation: when a detection with a barcode is confirmed
+    (via confirm_scan_session or link_detection_to_product), the mapping
+    is persisted here.  Future scans use this as a fast lookup before
+    falling back to name matching.
+
+    Scoped to (tenant, store) — the same barcode may map to different
+    products at different stores.  The ``hit_count`` column tracks how
+    many times this mapping was used, enabling future confidence ranking.
+    """
+
+    __tablename__ = "product_recognitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "store_id", "barcode",
+            name="uq_product_recognitions_tenant_store_barcode",
+        ),
+        Index("ix_product_recognitions_tenant_store", "tenant_id", "store_id"),
+        Index("ix_product_recognitions_barcode", "barcode"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    store_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), index=True
+    )
+    barcode: Mapped[str] = mapped_column(String(64))
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(
+        String(30), default="user_confirm"
+    )  # user_confirm | link | manual
+    hit_count: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )

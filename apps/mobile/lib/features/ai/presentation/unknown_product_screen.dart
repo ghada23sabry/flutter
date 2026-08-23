@@ -72,6 +72,7 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   late final TextEditingController _priceCtrl;
 
   bool _saving = false;
+  bool _enriching = false;
   String? _error;
 
   @override
@@ -86,6 +87,39 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     _descCtrl = TextEditingController(text: d.description ?? '');
     _unitCtrl = TextEditingController(text: 'pcs');
     _priceCtrl = TextEditingController(text: '0.00');
+    if (d.barcode != null && d.barcode!.isNotEmpty && d.name.isEmpty) {
+      _enrichBarcode(d.barcode!);
+    }
+  }
+
+  Future<void> _enrichBarcode(String barcode) async {
+    setState(() => _enriching = true);
+    try {
+      final enrichment = await widget.catalogApi.enrichBarcode(
+        store: widget.store,
+        barcode: barcode,
+      );
+      if (enrichment != null && !enrichment.isEmpty && mounted) {
+        setState(() {
+          if (_nameCtrl.text.isEmpty && enrichment.name != null) {
+            _nameCtrl.text = enrichment.name!;
+          }
+          if (_brandCtrl.text.isEmpty && enrichment.brand != null) {
+            _brandCtrl.text = enrichment.brand!;
+          }
+          if (_categoryCtrl.text.isEmpty && enrichment.category != null) {
+            _categoryCtrl.text = enrichment.category!;
+          }
+          if (_descCtrl.text.isEmpty && enrichment.description != null) {
+            _descCtrl.text = enrichment.description!;
+          }
+        });
+      }
+    } catch (_) {
+      // Enrichment is best-effort — ignore failures.
+    } finally {
+      if (mounted) setState(() => _enriching = false);
+    }
   }
 
   @override
@@ -174,12 +208,17 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.help_outline, color: Colors.orange),
+                      Icon(
+                        _enriching ? Icons.sync : Icons.help_outline,
+                        color: _enriching ? Colors.blue : Colors.orange,
+                      ),
                       const SizedBox(width: AppSpacing.sm),
                       Expanded(
                         child: Text(
-                          'This product was not found in your catalog. '
-                          'Review the detected information and create it.',
+                          _enriching
+                              ? 'Looking up product information…'
+                              : 'This product was not found in your catalog. '
+                                  'Review the detected information and create it.',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),

@@ -35,5 +35,8 @@ include = ["app*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
+[tool.fastapi]
+entrypoint = "app.main:app"
+
 [tool.ruff]
 line-length = 120
