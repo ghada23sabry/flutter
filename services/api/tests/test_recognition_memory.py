@@ -14,13 +14,7 @@ Covers:
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy import select
-
-from app.ai.contract import DetectedItem
-from app.core.db import SessionLocal
-from app.models import ProductRecognition, ScanDetection, Store
-from app.services.ai_service import SESSION_STATUS_COMPLETED, link_detection_to_product, _resolve_product
 from test_scan_service import (
     BARCODE_A,
     FakeVisionPort,
@@ -30,6 +24,10 @@ from test_scan_service import (
     _scan_env,
 )
 
+from app.ai.contract import DetectedItem
+from app.core.db import SessionLocal
+from app.models import ProductRecognition, ScanDetection, Store
+from app.services.ai_service import _resolve_product, link_detection_to_product
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -97,7 +95,7 @@ async def test_link_writes_recognition_with_unknown_barcode(tenant_creds):
             method="barcode",
             detected_barcode=unknown_barcode,
             confidence=Decimal("0.95"),
-            quantity=Decimal("5"),
+            quantity=Decimal(5),
         ),
     ])
     await _process(creds, session.id, port)
@@ -130,11 +128,11 @@ async def test_link_no_barcode_skips_recognition(tenant_creds):
             method="barcode",
             detected_barcode="9999999999999",
             confidence=Decimal("0.95"),
-            quantity=Decimal("5"),
+            quantity=Decimal(5),
         ),
     ])
     await _process(creds, session.id, port)
-    dets = await _detections_for(session.id)
+    await _detections_for(session.id)
 
     # Now create a manual detection without barcode and link it
     async with SessionLocal() as db:
@@ -145,7 +143,7 @@ async def test_link_no_barcode_skips_recognition(tenant_creds):
             method="manual",
             detected_barcode=None,
             detected_sku=None,
-            quantity_detected=Decimal("1"),
+            quantity_detected=Decimal(1),
             status="accepted",
         )
         db.add(det)
@@ -176,7 +174,7 @@ async def test_confirm_writes_recognition_memory(tenant_creds):
                 method="barcode",
                 detected_barcode=unknown_barcode,
                 confidence=Decimal("0.95"),
-                quantity=Decimal("5"),
+                quantity=Decimal(5),
             ),
         ])
         await _process(creds, session.id, port)
@@ -218,7 +216,7 @@ async def test_confirm_writes_recognition_for_resolved_detection(tenant_creds):
                 method="barcode",
                 detected_barcode=BARCODE_A,
                 confidence=Decimal("0.95"),
-                quantity=Decimal("5"),
+                quantity=Decimal(5),
             ),
         ])
         await _process(creds, session.id, port)
@@ -264,7 +262,7 @@ async def test_resolve_product_uses_recognition_memory(tenant_creds):
         method="barcode",
         detected_barcode=unknown_barcode,
         confidence=Decimal("0.95"),
-        quantity=Decimal("3"),
+        quantity=Decimal(3),
     )
 
     async with SessionLocal() as db:
@@ -312,7 +310,7 @@ async def test_resolve_product_recognition_stale_product(tenant_creds):
         method="barcode",
         detected_barcode=unknown_barcode,
         confidence=Decimal("0.95"),
-        quantity=Decimal("3"),
+        quantity=Decimal(3),
     )
 
     async with SessionLocal() as db:
@@ -334,7 +332,7 @@ async def test_confirm_increments_hit_count(tenant_creds):
         # First confirm (link + confirm = hit_count 2)
         s1 = await _create(creds, shelf_id=env["shelf_id"])
         port1 = FakeVisionPort([
-            DetectedItem(method="barcode", detected_barcode=barcode, confidence=Decimal("0.95"), quantity=Decimal("3")),
+            DetectedItem(method="barcode", detected_barcode=barcode, confidence=Decimal("0.95"), quantity=Decimal(3)),
         ])
         await _process(creds, s1.id, port1)
         dets1 = await _detections_for(s1.id)
@@ -353,7 +351,7 @@ async def test_confirm_increments_hit_count(tenant_creds):
         # Second confirm (link + confirm = hit_count 4)
         s2 = await _create(creds, shelf_id=env["shelf_id"])
         port2 = FakeVisionPort([
-            DetectedItem(method="barcode", detected_barcode=barcode, confidence=Decimal("0.95"), quantity=Decimal("7")),
+            DetectedItem(method="barcode", detected_barcode=barcode, confidence=Decimal("0.95"), quantity=Decimal(7)),
         ])
         await _process(creds, s2.id, port2)
         dets2 = await _detections_for(s2.id)
@@ -398,7 +396,7 @@ async def test_recognition_scoped_per_store(tenant_creds):
         method="barcode",
         detected_barcode=barcode,
         confidence=Decimal("0.95"),
-        quantity=Decimal("1"),
+        quantity=Decimal(1),
     )
     async with SessionLocal() as db:
         product = await _resolve_product(db, creds["tenant_id"], store2.id, item)
@@ -426,7 +424,7 @@ async def test_resolve_uses_off_enrichment_when_name_matches(tenant_creds):
         method="barcode",
         detected_barcode=unknown_barcode,
         confidence=Decimal("0.95"),
-        quantity=Decimal("3"),
+        quantity=Decimal(3),
     )
 
     with patch("app.services.ai_service.enrich_barcode_off", new_callable=AsyncMock, return_value=mock_result):
@@ -453,7 +451,7 @@ async def test_resolve_skips_off_when_no_name(tenant_creds):
         method="barcode",
         detected_barcode=unknown_barcode,
         confidence=Decimal("0.95"),
-        quantity=Decimal("3"),
+        quantity=Decimal(3),
     )
 
     with patch("app.services.ai_service.enrich_barcode_off", new_callable=AsyncMock, return_value=mock_result):

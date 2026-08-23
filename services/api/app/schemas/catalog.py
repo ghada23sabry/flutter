@@ -50,10 +50,15 @@ class ProductIn(BaseModel):
     category_id: uuid.UUID | None = None
     name: str = Field(min_length=1, max_length=200)
     brand: str | None = Field(default=None, max_length=200)
-    sku: str = Field(min_length=1, max_length=64)
+    variant: str | None = Field(default=None, max_length=120)
+    model_name: str | None = Field(default=None, max_length=120)
+    sku: str | None = Field(default=None, max_length=64)
     barcode: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=5000)
     unit: str = Field(min_length=1, max_length=20)
+    size: str | None = Field(default=None, max_length=60)
+    weight: str | None = Field(default=None, max_length=60)
+    volume: str | None = Field(default=None, max_length=60)
     cost_price: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=2)
     selling_price: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     reorder_point: Decimal = Field(default=Decimal(0), ge=0, max_digits=12, decimal_places=3)
@@ -66,10 +71,15 @@ class ProductUpdate(BaseModel):
     category_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
     brand: str | None = Field(default=None, max_length=200)
+    variant: str | None = Field(default=None, max_length=120)
+    model_name: str | None = Field(default=None, max_length=120)
     sku: str | None = Field(default=None, min_length=1, max_length=64)
     barcode: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=5000)
     unit: str | None = Field(default=None, min_length=1, max_length=20)
+    size: str | None = Field(default=None, max_length=60)
+    weight: str | None = Field(default=None, max_length=60)
+    volume: str | None = Field(default=None, max_length=60)
     cost_price: Decimal | None = Field(default=None, ge=0, max_digits=14, decimal_places=2)
     selling_price: Decimal | None = Field(default=None, gt=0, max_digits=14, decimal_places=2)
     reorder_point: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=3)
@@ -90,8 +100,13 @@ class ProductOut(BaseModel):
     barcode: str | None
     name: str
     brand: str | None = None
+    variant: str | None = None
+    model_name: str | None = None
     description: str | None
     unit: str
+    size: str | None = None
+    weight: str | None = None
+    volume: str | None = None
     cost_price: Decimal
     selling_price: Decimal
     reorder_point: Decimal
@@ -178,6 +193,35 @@ class SupplierProductOut(BaseModel):
     supplier_cost: Decimal | None
     lead_time_days: int | None
     is_preferred: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class SkuSettingIn(BaseModel):
+    prefix: str = Field(default="SKU", max_length=20)
+    separator: str = Field(default="-", max_length=5)
+    counter_length: int = Field(default=5, ge=1, le=10)
+    category_prefix: bool = False
+
+
+class SkuSettingUpdate(BaseModel):
+    prefix: str | None = Field(default=None, max_length=20)
+    separator: str | None = Field(default=None, max_length=5)
+    counter_length: int | None = Field(default=None, ge=1, le=10)
+    category_prefix: bool | None = None
+
+
+class SkuSettingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    store_id: uuid.UUID
+    prefix: str
+    separator: str
+    counter_length: int
+    next_counter: int
+    category_prefix: bool
     created_at: datetime
     updated_at: datetime
 

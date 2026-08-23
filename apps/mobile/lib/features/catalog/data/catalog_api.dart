@@ -1,4 +1,5 @@
 import '../../../core/api_client.dart';
+import '../../../core/cache.dart';
 import '../../../core/models/auth_models.dart';
 import 'catalog_models.dart';
 
@@ -8,9 +9,11 @@ import 'catalog_models.dart';
 /// server-side against the token's accessible stores). Suppliers are
 /// tenant-scoped (no `store_id`).
 class CatalogApi {
-  const CatalogApi(this._client);
+  CatalogApi(this._client);
 
   final ApiClient _client;
+
+  static const Duration _categoryCacheTtl = Duration(minutes: 5);
 
   // ── Products (store-scoped) ─────────────────────────────────────────────
 
@@ -149,14 +152,26 @@ class CatalogApi {
   Future<List<Category>> listCategories({
     required StoreInfo store,
     String? status,
+    bool forceRefresh = false,
   }) async {
-    final items = await _client.getList(
-      '/categories',
-      query: {'store_id': store.id, 'status': ?status},
+    final cacheKey = 'categories:${store.id}:${status ?? 'all'}';
+    if (forceRefresh) {
+      AppCache.instance.invalidate(cacheKey);
+    }
+    return AppCache.instance.get<List<Category>>(
+      cacheKey,
+      _categoryCacheTtl,
+      () async {
+        final items = await _client.getList(
+          '/categories',
+          query: {'store_id': store.id, 'status': ?status},
+        );
+        return [
+          for (final item in items)
+            Category.fromJson(item as Map<String, dynamic>),
+        ];
+      },
     );
-    return [
-      for (final item in items) Category.fromJson(item as Map<String, dynamic>),
-    ];
   }
 
   Future<Category> getCategory({
@@ -179,6 +194,7 @@ class CatalogApi {
       query: {'store_id': store.id},
       body: input.toJson(),
     );
+    AppCache.instance.invalidatePrefix('categories:${store.id}');
     return Category.fromJson(json);
   }
 
@@ -192,6 +208,7 @@ class CatalogApi {
       query: {'store_id': store.id},
       body: update.toJson(),
     );
+    AppCache.instance.invalidatePrefix('categories:${store.id}');
     return Category.fromJson(json);
   }
 

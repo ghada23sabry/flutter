@@ -23,8 +23,13 @@ class Product {
     this.barcode,
     required this.name,
     this.brand,
+    this.variant,
+    this.modelName,
     this.description,
     required this.unit,
+    this.size,
+    this.weight,
+    this.volume,
     required this.costPrice,
     required this.sellingPrice,
     required this.reorderPoint,
@@ -45,8 +50,13 @@ class Product {
     barcode: json['barcode'] as String?,
     name: json['name'] as String,
     brand: json['brand'] as String?,
+    variant: json['variant'] as String?,
+    modelName: json['model_name'] as String?,
     description: json['description'] as String?,
     unit: json['unit'] as String? ?? '',
+    size: json['size'] as String?,
+    weight: json['weight'] as String?,
+    volume: json['volume'] as String?,
     costPrice: _toDouble(json['cost_price']),
     sellingPrice: _toDouble(json['selling_price']),
     reorderPoint: _toDouble(json['reorder_point']),
@@ -66,8 +76,13 @@ class Product {
   final String? barcode;
   final String name;
   final String? brand;
+  final String? variant;
+  final String? modelName;
   final String? description;
   final String unit;
+  final String? size;
+  final String? weight;
+  final String? volume;
   final double costPrice;
   final double sellingPrice;
   final double reorderPoint;
@@ -92,8 +107,13 @@ class Product {
     'barcode': barcode,
     'name': name,
     'brand': brand,
+    'variant': variant,
+    'model_name': modelName,
     'description': description,
     'unit': unit,
+    'size': size,
+    'weight': weight,
+    'volume': volume,
     'cost_price': costPrice,
     'selling_price': sellingPrice,
     'reorder_point': reorderPoint,
@@ -112,12 +132,17 @@ class ProductInput {
     this.categoryId,
     required this.name,
     this.brand,
-    required this.sku,
+    this.variant,
+    this.modelName,
+    this.sku,
     this.barcode,
     this.description,
     required this.unit,
+    this.size,
+    this.weight,
+    this.volume,
     this.costPrice,
-    required this.sellingPrice,
+    this.sellingPrice,
     this.reorderPoint,
     this.reorderQuantity,
     this.expiryTrackingEnabled,
@@ -127,12 +152,17 @@ class ProductInput {
   final String? categoryId;
   final String name;
   final String? brand;
-  final String sku;
+  final String? variant;
+  final String? modelName;
+  final String? sku;
   final String? barcode;
   final String? description;
   final String unit;
+  final String? size;
+  final String? weight;
+  final String? volume;
   final double? costPrice;
-  final double sellingPrice;
+  final double? sellingPrice;
   final double? reorderPoint;
   final double? reorderQuantity;
   final bool? expiryTrackingEnabled;
@@ -142,12 +172,17 @@ class ProductInput {
     if (categoryId != null) 'category_id': categoryId,
     'name': name,
     if (brand != null) 'brand': brand,
-    'sku': sku,
+    if (variant != null) 'variant': variant,
+    if (modelName != null) 'model_name': modelName,
+    if (sku != null) 'sku': sku,
     if (barcode != null) 'barcode': barcode,
     if (description != null) 'description': description,
     'unit': unit,
+    if (size != null) 'size': size,
+    if (weight != null) 'weight': weight,
+    if (volume != null) 'volume': volume,
     if (costPrice != null) 'cost_price': costPrice,
-    'selling_price': sellingPrice,
+    if (sellingPrice != null) 'selling_price': sellingPrice,
     if (reorderPoint != null) 'reorder_point': reorderPoint,
     if (reorderQuantity != null) 'reorder_quantity': reorderQuantity,
     if (expiryTrackingEnabled != null)
@@ -163,11 +198,16 @@ class ProductUpdate {
     this.clearCategory = false,
     this.name,
     this.brand,
+    this.variant,
+    this.modelName,
     this.sku,
     this.barcode,
     this.clearBarcode = false,
     this.description,
     this.unit,
+    this.size,
+    this.weight,
+    this.volume,
     this.costPrice,
     this.sellingPrice,
     this.reorderPoint,
@@ -184,6 +224,8 @@ class ProductUpdate {
   final bool clearCategory;
   final String? name;
   final String? brand;
+  final String? variant;
+  final String? modelName;
   final String? sku;
   final String? barcode;
 
@@ -192,6 +234,9 @@ class ProductUpdate {
   final bool clearBarcode;
   final String? description;
   final String? unit;
+  final String? size;
+  final String? weight;
+  final String? volume;
   final double? costPrice;
   final double? sellingPrice;
   final double? reorderPoint;
@@ -207,6 +252,8 @@ class ProductUpdate {
       'category_id': null,
     if (name != null) 'name': name,
     if (brand != null) 'brand': brand,
+    if (variant != null) 'variant': variant,
+    if (modelName != null) 'model_name': modelName,
     if (sku != null) 'sku': sku,
     if (barcode != null)
       'barcode': barcode
@@ -214,6 +261,9 @@ class ProductUpdate {
       'barcode': null,
     if (description != null) 'description': description,
     if (unit != null) 'unit': unit,
+    if (size != null) 'size': size,
+    if (weight != null) 'weight': weight,
+    if (volume != null) 'volume': volume,
     if (costPrice != null) 'cost_price': costPrice,
     if (sellingPrice != null) 'selling_price': sellingPrice,
     if (reorderPoint != null) 'reorder_point': reorderPoint,

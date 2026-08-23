@@ -20,15 +20,6 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
-
-from app.core.db import SessionLocal
-from app.core.errors import AppError
-from app.models import ScanDetection, ScanReconciliation, StockMovement, Store
-from app.services.ai_service import (
-    SESSION_STATUS_CONFIRMED,
-    SESSION_STATUS_NEEDS_REVIEW,
-    link_detection_to_product,
-)
 from test_scan_service import (
     BARCODE_A,
     FakeVisionPort,
@@ -40,6 +31,15 @@ from test_scan_service import (
     _process,
     _product_payload,
     _scan_env,
+)
+
+from app.core.db import SessionLocal
+from app.core.errors import AppError
+from app.models import ScanDetection, ScanReconciliation, StockMovement, Store
+from app.services.ai_service import (
+    SESSION_STATUS_CONFIRMED,
+    SESSION_STATUS_NEEDS_REVIEW,
+    link_detection_to_product,
 )
 
 

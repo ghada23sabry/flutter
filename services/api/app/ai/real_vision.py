@@ -68,6 +68,12 @@ SYSTEM_PROMPT = (
     '- "barcode": the barcode/UPC/EAN number as a string if visible, or null\n'
     '- "sku": the SKU code as a string if visible, or null\n'
     '- "category": product category (e.g. "Snacks", "Beverages", "Dairy")\n'
+    '- "variant": product variant if visible (e.g. "Spicy", "Low Sugar", "Family Pack"), or null\n'
+    '- "model_name": model/product line name if visible (e.g. "Pro Max", "Lite"), or null\n'
+    '- "size": product size if visible (e.g. "500ml", "1kg", "Large", "Medium"), or null\n'
+    '- "weight": net weight if visible on label (e.g. "250g", "1 lb"), or null\n'
+    '- "volume": volume if visible (e.g. "750ml", "1.5L"), or null\n'
+    '- "selling_price": price if visible on shelf tag or label (e.g. "12.99", "€5.50"), or null\n'
     '- "quantity": how many units of this specific product are visible (integer)\n'
     '- "confidence": your confidence in the identification (0.0 to 1.0)\n'
     '- "ocr_text": any text you can read on the packaging, or null\n'
@@ -76,6 +82,8 @@ SYSTEM_PROMPT = (
     "If you cannot confidently identify a product, still include it with low "
     "confidence and whatever partial information you extracted.\n"
     "Do not fabricate barcodes or SKUs — only include them if clearly visible.\n"
+    "Extract size/weight/volume from packaging labels. Price may appear on "
+    "shelf tags, price stickers, or printed labels.\n"
     "If the image does not contain recognizable retail products, return "
     "{\"items\": []}."
 )
@@ -262,7 +270,8 @@ def _parse_items(raw: str) -> list[DetectedItem]:
             if qty <= 0:
                 qty = Decimal(1)
             meta: dict = {}
-            for key in ("name", "brand", "category", "ocr_text", "description"):
+            for key in ("name", "brand", "category", "ocr_text", "description",
+                        "variant", "model_name", "size", "weight", "volume", "selling_price"):
                 val = entry.get(key)
                 if val is not None and str(val).strip():
                     meta[key] = str(val).strip()

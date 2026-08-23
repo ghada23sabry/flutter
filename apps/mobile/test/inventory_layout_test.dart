@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:visionstock_mobile/core/api_client.dart';
+import 'package:visionstock_mobile/core/cache.dart';
 import 'package:visionstock_mobile/core/session_store.dart';
 import 'package:visionstock_mobile/core/widgets/app_card.dart';
 import 'package:visionstock_mobile/main.dart';
@@ -777,6 +778,8 @@ Future<void> _tapFabLabel(WidgetTester tester, String label) async {
 }
 
 void main() {
+  setUp(() => AppCache.instance.clear());
+
   group('zones', () {
     testWidgets('list renders zones, codes and the inactive tag', (
       tester,

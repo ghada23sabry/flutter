@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:visionstock_mobile/core/api_client.dart';
+import 'package:visionstock_mobile/core/cache.dart';
 import 'package:visionstock_mobile/core/session_store.dart';
 import 'package:visionstock_mobile/main.dart';
 
@@ -250,6 +251,8 @@ Future<void> _login(WidgetTester tester, ApiClient apiClient) async {
 }
 
 void main() {
+  setUp(() => AppCache.instance.clear());
+
   testWidgets('category list shows active categories with name and code', (
     tester,
   ) async {

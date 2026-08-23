@@ -1,6 +1,6 @@
 # VisionStock AI — PROJECT_MAP.md
 
-> External memory (memory ledger). Updated: **2026-08-12** (system date: 2026-08-12, UTC+2).
+> External memory (memory ledger). Updated: **2026-08-23** (system date: 2026-08-23, UTC+2).
 > Maintainers MUST update this file whenever the stack, flow, or architecture changes.
 
 ---
@@ -201,21 +201,22 @@ visionstock-ai/
 ```
 core (shared): config | db.session | security(tenant+store+device+RBAC) | logging | notifications
 auth      → routers/auth.py | services/auth_service.py
-catalog   → products (store-scoped), categories, suppliers, product_visual_profiles
+catalog   → products (store-scoped), categories, suppliers, product_visual_profiles, sku_settings, sku_service
 layout    → zones, shelves, shelf_positions (Store Setup Wizard data)
 inventory → stock service, adjustment (+audit), scans, reconciliation
 pos       → sales service (atomic sale+deduct), receipt
 purchasing→ PO service (state machine), supplier email
-ai        → AIVisionPort (adapter → vision pipeline) — replaceable, store-aware
+ai        → AIVisionPort (adapter → vision pipeline) — replaceable, store-aware; barcode_enrichment (Open Food Facts)
 intel     → forecasting (stockout/reorder/expiry risk), AI assistant (DB queries only)
 system    → tenants, users/roles/permissions, devices, notifications, audit_logs
+uploads   → routers/uploads.py — product image upload/delete + static file serving
 ```
 
 ### Database (core tables — MVP)
 See the authoritative **`[DATABASE_BLUEPRINT]`** section below (logical ERD, scope matrix, relationships, transaction boundaries). This bullet list is now superseded and kept only as a domain index:
 - identity: `tenants`, `stores`, `users`, `roles`, `permissions`, `role_permissions`, `user_roles`, `devices`, `device_sessions`
 - layout: `zones`, `shelves`, `shelf_product_map`
-- catalog: `categories`, `products` (tenant+store scoped), `product_visual_profiles`, `product_visual_embeddings`, `suppliers`, `supplier_products`, `expiry_batches`
+- catalog: `categories`, `products` (tenant+store scoped), `product_visual_profiles`, `product_visual_embeddings`, `suppliers`, `supplier_products`, `expiry_batches`, `sku_settings`
 - sales: `sales`, `sale_items`, `payments`
 - inventory: `inventory`, `stock_movements`, `inventory_count_sessions`, `inventory_count_items`, `inventory_adjustments`, `reconciliations`
 - purchasing: `purchase_orders`, `purchase_order_items`
@@ -266,9 +267,11 @@ Logical design review for **Release 0.1** (docs only — no migrations created y
 | Table | Key columns | Notes |
 |---|---|---|
 | `categories` | id, **tenant_id**, **store_id**, parent_id (nullable), name, code | |
-| `products` | id, **tenant_id**, **store_id**, category_id, name, sku (unique per store), barcode (nullable), unit, price, cost, min_stock, max_stock, status(active/archived) | |
+| `products` | id, **tenant_id**, **store_id**, category_id, name, sku (unique per store), barcode (nullable), unit, brand (nullable), variant (nullable), model_name (nullable), description (nullable), size (nullable), weight (nullable), volume (nullable), cost_price, selling_price, reorder_point, reorder_quantity, expiry_tracking_enabled, image_url (nullable), status(active/inactive), created_at, updated_at | Extended fields added in 0011. |
 | `product_visual_profiles` | id, **tenant_id**, **store_id**, product_id, label, reference_image_url, is_default | Multiple ref images/product. |
 | `product_visual_embeddings` | id, **tenant_id**, **store_id**, product_id, profile_id, vector, model_version | `vector` = pgvector later; JSONB float array on local until then (see §9). |
+| `sku_settings` | id, **tenant_id**, **store_id**, prefix, separator, next_counter (INT, NOT NULL DEFAULT 1) | Per-tenant/store SKU auto-generation counter. UNIQUE(tenant_id, store_id). Added in 0011. |
+| `product_recognitions` | id, **tenant_id**, **store_id**, barcode, product_id, source, confidence, created_at | Barcode→product recognition memory. Added in 0009. |
 
 **Suppliers**
 | Table | Key columns |
@@ -918,6 +921,39 @@ No permission was broadened: only the four permissions seeded in migration `0005
 ### Supersessions
 - `[CAMERA_AI_INVENTORY]` camera path note ("mobile_scanner 7.x, no manual shutter, barcode-triggered") is superseded: camera capture is now manual via `camera` plugin `takePicture()`. Operation chooser still present but also bypassable via `initialOperation`.
 - `[CAMERA_AI_M4B]` "mobile_scanner removed" is superseded: `mobile_scanner 7.4.0` restored alongside `camera 0.11.0` as a dual-plugin architecture. `camera` handles manual photo capture; `mobile_scanner` handles barcode scanning exclusively. Exclusive camera ownership enforced (never both active simultaneously). Android Gradle `subprojects` block injects `androidx.concurrent:concurrent-futures` to resolve CameraX compile conflict.
+
+---
+
+## [18_REQ_OVERHAUL] — Product Catalog Enhancement, verified 2026-08-23
+
+**DONE.** Eighteen-request overhaul to make the app industry-agnostic (not supermarket-specific). Backend: extended product fields, SKU auto-generation, image upload, AI OCR extraction, SKU settings. Flutter: extended product models, SKU-optional create/edit, AI field passthrough.
+
+### Backend
+
+- **Product model extensions** (`app/models/catalog.py`): Added `brand`, `variant`, `model_name`, `size`, `weight`, `volume` columns (all nullable, `String(120)` / `String(60)`). `ProductIn.sku` now optional — auto-generates when left empty.
+- **SKU settings model** (`app/models/catalog.py`): New `SkuSetting` table — `tenant_id`, `store_id`, `prefix` (nullable `String(20)`), `separator` (default `'-'`), `next_counter` (INT, NOT NULL DEFAULT 1). UNIQUE(tenant_id, store_id). Atomic counter with `SELECT FOR UPDATE`.
+- **SKU service** (`app/services/sku_service.py`): `generate_sku()` — atomic counter increment, configurable prefix+separator+counter pattern. `get_or_create_sku_setting()` — upsert for tenant/store.
+- **SKU settings endpoints** (`app/routers/products.py`): `GET /products/sku-settings` → current SKU template. `PATCH /products/sku-settings` → update prefix/separator. `GET /products/preview-sku` → preview next SKU without incrementing.
+- **Image upload** (`app/routers/uploads.py`): `POST /uploads/products/{product_id}/image` — multipart upload, filesystem storage under configurable `upload_dir`. `DELETE /uploads/products/{product_id}/image` — remove file. Static mount at `/uploads` via `StaticFiles`. Max size configurable via `max_upload_size_mb`.
+- **AI OCR enhancement** (`app/ai/real_vision.py`): System prompt extended to extract `variant`, `model_name`, `size`, `weight`, `volume`, `selling_price` from vision API. `_parse_items()` meta extraction includes all new fields.
+- **Config** (`app/config.py`): Added `upload_dir: str = "uploads"` and `max_upload_size_mb: int = 10`.
+- **Migration 0011** (`migrations/versions/0011_product_extended_fields_sku_settings.py`): Adds `variant`, `model_name`, `size`, `weight`, `volume` to `products` + creates `sku_settings` table. Applied to local DB.
+- **Tests**: 236 backend tests pass. `ruff check` clean.
+
+### Mobile (Flutter)
+
+- **Catalog models** (`catalog_models.dart`): `Product` and `ProductInput` extended with `brand`, `variant`, `modelName`, `size`, `weight`, `volume`. `ProductInput.sku` now nullable (auto-generate when empty). `ProductUpdate` extended with new fields.
+- **Product edit screen** (`product_edit_screen.dart`): SKU field optional ("auto if empty"), new "Dimensions & Weight" section (size, weight, volume), variant field in Basics section. SKU validator removed — server auto-generates.
+- **Unknown product screen** (`unknown_product_screen.dart`): SKU optional, new controllers for variant/size/weight/volume/selling price, new form fields.
+- **AI scan models** (`ai_models.dart`): `ScanDetection` extended with `metaVariant`, `metaModelName`, `metaSize`, `metaWeight`, `metaVolume`, `metaSellingPrice` getters.
+- **AI count screen** (`ai_count_screen.dart`): `UnknownProductData` populated with AI-extracted fields from detection metadata.
+- **Tests**: 161 Flutter tests pass (25 skipped live). `flutter analyze` clean (7 pre-existing hints).
+
+### What's NOT in this sprint
+
+- Image compression (no Pillow dependency) — stored as-is.
+- No APK installed on device — requires physical verification.
+- Production deployment done; local migration 0011 applied.
 
 ---
 

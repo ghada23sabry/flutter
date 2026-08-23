@@ -1,6 +1,6 @@
 from app.models.ai import ProductRecognition, ProductVisualRecognition, ScanDetection, ScanReconciliation, ScanSession
 from app.models.audit import AuditLog
-from app.models.catalog import Category, Product, ProductVisualProfile, Supplier, SupplierProduct
+from app.models.catalog import Category, Product, ProductVisualProfile, SkuSetting, Supplier, SupplierProduct
 from app.models.identity import (
     Device,
     DeviceSession,
@@ -40,6 +40,7 @@ __all__ = [
     "ScanSession",
     "Shelf",
     "ShelfProductMap",
+    "SkuSetting",
     "StockMovement",
     "Store",
     "Supplier",

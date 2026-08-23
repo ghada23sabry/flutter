@@ -40,6 +40,9 @@ Thumbs.db
 # Local credentials
 services/api/login.json
 
+# Uploaded files
+uploads/
+
 # Temp scripts / debug artifacts
 services/api/_*.py
 services/api/main.py

@@ -50,6 +50,10 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
   late final TextEditingController _imageUrl;
   late final TextEditingController _initialQty;
   late final TextEditingController _batchCode;
+  late final TextEditingController _variant;
+  late final TextEditingController _size;
+  late final TextEditingController _weight;
+  late final TextEditingController _volume;
 
   DateTime? _expiryDate;
   String? _categoryId;
@@ -89,6 +93,10 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
     _imageUrl = TextEditingController(text: p?.imageUrl ?? '');
     _initialQty = TextEditingController(text: '0');
     _batchCode = TextEditingController();
+    _variant = TextEditingController(text: p?.variant ?? '');
+    _size = TextEditingController(text: p?.size ?? '');
+    _weight = TextEditingController(text: p?.weight ?? '');
+    _volume = TextEditingController(text: p?.volume ?? '');
     _categoryId = p?.categoryId;
     _expiryTracking = p?.expiryTrackingEnabled ?? false;
     _isActive = p?.isActive ?? true;
@@ -112,6 +120,10 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
     _imageUrl.dispose();
     _initialQty.dispose();
     _batchCode.dispose();
+    _variant.dispose();
+    _size.dispose();
+    _weight.dispose();
+    _volume.dispose();
     super.dispose();
   }
 
@@ -232,6 +244,10 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
               ? null
               : _description.text.trim(),
           unit: _unit.text.trim(),
+          variant: _variant.text.trim().isEmpty ? null : _variant.text.trim(),
+          size: _size.text.trim().isEmpty ? null : _size.text.trim(),
+          weight: _weight.text.trim().isEmpty ? null : _weight.text.trim(),
+          volume: _volume.text.trim().isEmpty ? null : _volume.text.trim(),
           costPrice: _parseMoney(_cost.text),
           sellingPrice: _parseMoney(_selling.text),
           reorderPoint: _parseMoney(_reorderPoint.text),
@@ -268,12 +284,16 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
   ProductInput _productInput() => ProductInput(
     categoryId: _categoryId,
     name: _name.text.trim(),
-    sku: _sku.text.trim(),
+    sku: _sku.text.trim().isEmpty ? null : _sku.text.trim(),
     barcode: _barcode.text.trim().isEmpty ? null : _barcode.text.trim(),
     description: _description.text.trim().isEmpty
         ? null
         : _description.text.trim(),
     unit: _unit.text.trim(),
+    variant: _variant.text.trim().isEmpty ? null : _variant.text.trim(),
+    size: _size.text.trim().isEmpty ? null : _size.text.trim(),
+    weight: _weight.text.trim().isEmpty ? null : _weight.text.trim(),
+    volume: _volume.text.trim().isEmpty ? null : _volume.text.trim(),
     costPrice: _parseMoney(_cost.text),
     sellingPrice: _parseMoney(_selling.text)!,
     reorderPoint: _parseMoney(_reorderPoint.text),
@@ -367,11 +387,10 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
                     children: [
                       Expanded(
                         child: AppInput(
-                          label: 'SKU *',
-                          hintText: 'Unique code',
+                          label: 'SKU (auto if empty)',
+                          hintText: 'Leave empty for auto-generate',
                           controller: _sku,
                           textInputAction: TextInputAction.next,
-                          validator: _required,
                         ),
                       ),
                       const SizedBox(width: AppSpacing.md),
@@ -385,6 +404,13 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppInput(
+                    label: 'Variant',
+                    hintText: 'e.g. Spicy, Family Pack',
+                    controller: _variant,
+                    textInputAction: TextInputAction.next,
                   ),
                   const SizedBox(height: AppSpacing.md),
                   DropdownButtonFormField<String>(
@@ -453,6 +479,41 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
                     controller: _description,
                     maxLines: 3,
                     textInputAction: TextInputAction.newline,
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              _SectionCard(
+                title: 'Dimensions & Weight',
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: AppInput(
+                          label: 'Size',
+                          hintText: 'e.g. 500ml, Large',
+                          controller: _size,
+                          textInputAction: TextInputAction.next,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: AppInput(
+                          label: 'Weight',
+                          hintText: 'e.g. 250g, 1 lb',
+                          controller: _weight,
+                          textInputAction: TextInputAction.next,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppInput(
+                    label: 'Volume',
+                    hintText: 'e.g. 750ml, 1.5L',
+                    controller: _volume,
+                    textInputAction: TextInputAction.next,
                   ),
                 ],
               ),

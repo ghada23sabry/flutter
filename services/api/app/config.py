@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     near_expiry_days: int = 30
 
+    # File upload storage
+    upload_dir: str = "uploads"
+    max_upload_size_mb: int = 10
+
     # Single centralized confidence gate for AI vision (M4-A): any machine
     # detection below this score forces the scan session to NEEDS_REVIEW.
     ai_confidence_threshold: float = 0.70

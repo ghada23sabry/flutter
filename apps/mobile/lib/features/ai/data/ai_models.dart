@@ -197,6 +197,12 @@ class ScanDetection {
   String? get metaBrand => meta?['brand'] as String?;
   String? get metaCategory => meta?['category'] as String?;
   String? get metaDescription => meta?['description'] as String?;
+  String? get metaVariant => meta?['variant'] as String?;
+  String? get metaModelName => meta?['model_name'] as String?;
+  String? get metaSize => meta?['size'] as String?;
+  String? get metaWeight => meta?['weight'] as String?;
+  String? get metaVolume => meta?['volume'] as String?;
+  String? get metaSellingPrice => meta?['selling_price'] as String?;
 
   /// Best human label: resolved product → detected barcode → detected SKU → AI name → fallback.
   String get referenceLabel {

@@ -19,6 +19,8 @@ from app.schemas import (
     ProductIn,
     ProductOut,
     ProductUpdate,
+    SkuSettingOut,
+    SkuSettingUpdate,
     SupplierProductOut,
 )
 from app.services.catalog_service import (
@@ -28,6 +30,7 @@ from app.services.catalog_service import (
     normalize_barcode,
     require_store,
 )
+from app.services.sku_service import generate_sku, get_or_create_sku_setting
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,53 @@ async def list_products(
     return await _list_page(db, query, page, page_size)
 
 
+# ── SKU Settings ────────────────────────────────────────────────────────────
+
+
+@router.get("/sku-settings", response_model=SkuSettingOut)
+async def get_sku_settings(
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_VIEW))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    require_store(ctx, store_id)
+    return await get_or_create_sku_setting(db, ctx.tenant.id, store_id)
+
+
+@router.patch("/sku-settings", response_model=SkuSettingOut)
+async def update_sku_settings(
+    body: SkuSettingUpdate,
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_MANAGE))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    require_store(ctx, store_id)
+    setting = await get_or_create_sku_setting(db, ctx.tenant.id, store_id)
+    updates = body.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(setting, field, value)
+    await db.flush()
+    await db.commit()
+    await db.refresh(setting)
+    return setting
+
+
+@router.get("/preview-sku", response_model=dict)
+async def preview_sku(
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_VIEW))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+    category_id: Annotated[uuid.UUID | None, Query()] = None,
+):
+    require_store(ctx, store_id)
+    category_code = None
+    if category_id is not None:
+        cat = (await db.execute(select(Category.code).where(Category.id == category_id))).scalar_one_or_none()
+        category_code = cat
+    sku = await generate_sku(db, ctx.tenant.id, store_id, category_code)
+    return {"sku": sku}
+
+
 @router.post("", response_model=ProductOut, status_code=201)
 async def create_product(
     body: ProductIn,
@@ -112,16 +162,31 @@ async def create_product(
     require_store(ctx, store_id)
     if body.category_id is not None:
         await get_scoped_category(db, ctx, store_id, body.category_id)
+
+    if body.sku:
+        sku = clean_required(body.sku, "sku")
+    else:
+        category_code = None
+        if body.category_id is not None:
+            cat = (await db.execute(select(Category.code).where(Category.id == body.category_id))).scalar_one_or_none()
+            category_code = cat
+        sku = await generate_sku(db, ctx.tenant.id, store_id, category_code)
+
     product = Product(
         tenant_id=ctx.tenant.id,
         store_id=store_id,
         category_id=body.category_id,
         name=clean_required(body.name, "name"),
         brand=body.brand.strip() if body.brand else None,
-        sku=clean_required(body.sku, "sku"),
+        variant=body.variant.strip() if body.variant else None,
+        model_name=body.model_name.strip() if body.model_name else None,
+        sku=sku,
         barcode=normalize_barcode(body.barcode),
         description=body.description.strip() if body.description else None,
         unit=clean_required(body.unit, "unit"),
+        size=body.size.strip() if body.size else None,
+        weight=body.weight.strip() if body.weight else None,
+        volume=body.volume.strip() if body.volume else None,
         cost_price=body.cost_price,
         selling_price=body.selling_price,
         reorder_point=body.reorder_point,
@@ -255,6 +320,10 @@ async def update_product(
         product.name = clean_required(updates["name"], "name")
     if "brand" in updates:
         product.brand = updates["brand"].strip() if updates["brand"] else None
+    if "variant" in updates:
+        product.variant = updates["variant"].strip() if updates["variant"] else None
+    if "model_name" in updates:
+        product.model_name = updates["model_name"].strip() if updates["model_name"] else None
     if "sku" in updates and updates["sku"] is not None:
         product.sku = clean_required(updates["sku"], "sku")
     if "barcode" in updates:
@@ -263,6 +332,12 @@ async def update_product(
         product.description = updates["description"].strip() if updates["description"] else None
     if "unit" in updates and updates["unit"] is not None:
         product.unit = clean_required(updates["unit"], "unit")
+    if "size" in updates:
+        product.size = updates["size"].strip() if updates["size"] else None
+    if "weight" in updates:
+        product.weight = updates["weight"].strip() if updates["weight"] else None
+    if "volume" in updates:
+        product.volume = updates["volume"].strip() if updates["volume"] else None
     if "cost_price" in updates:
         product.cost_price = updates["cost_price"]
     if "selling_price" in updates:

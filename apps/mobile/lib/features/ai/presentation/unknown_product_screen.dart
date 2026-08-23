@@ -23,7 +23,13 @@ class UnknownProductData {
     this.sku,
     this.category,
     this.brand,
+    this.variant,
+    this.modelName,
     this.description,
+    this.size,
+    this.weight,
+    this.volume,
+    this.sellingPrice,
     this.detectedQuantity,
   });
 
@@ -32,7 +38,13 @@ class UnknownProductData {
   final String? sku;
   final String? category;
   final String? brand;
+  final String? variant;
+  final String? modelName;
   final String? description;
+  final String? size;
+  final String? weight;
+  final String? volume;
+  final String? sellingPrice;
   final double? detectedQuantity;
 }
 
@@ -67,9 +79,13 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   late final TextEditingController _skuCtrl;
   late final TextEditingController _categoryCtrl;
   late final TextEditingController _brandCtrl;
+  late final TextEditingController _variantCtrl;
   late final TextEditingController _descCtrl;
   late final TextEditingController _unitCtrl;
   late final TextEditingController _priceCtrl;
+  late final TextEditingController _sizeCtrl;
+  late final TextEditingController _weightCtrl;
+  late final TextEditingController _volumeCtrl;
 
   bool _saving = false;
   bool _enriching = false;
@@ -84,9 +100,13 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     _skuCtrl = TextEditingController(text: d.sku ?? '');
     _categoryCtrl = TextEditingController(text: d.category ?? '');
     _brandCtrl = TextEditingController(text: d.brand ?? '');
+    _variantCtrl = TextEditingController(text: d.variant ?? '');
     _descCtrl = TextEditingController(text: d.description ?? '');
     _unitCtrl = TextEditingController(text: 'pcs');
-    _priceCtrl = TextEditingController(text: '0.00');
+    _priceCtrl = TextEditingController(text: d.sellingPrice ?? '0.00');
+    _sizeCtrl = TextEditingController(text: d.size ?? '');
+    _weightCtrl = TextEditingController(text: d.weight ?? '');
+    _volumeCtrl = TextEditingController(text: d.volume ?? '');
     if (d.barcode != null && d.barcode!.isNotEmpty && d.name.isEmpty) {
       _enrichBarcode(d.barcode!);
     }
@@ -129,9 +149,13 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     _skuCtrl.dispose();
     _categoryCtrl.dispose();
     _brandCtrl.dispose();
+    _variantCtrl.dispose();
     _descCtrl.dispose();
     _unitCtrl.dispose();
     _priceCtrl.dispose();
+    _sizeCtrl.dispose();
+    _weightCtrl.dispose();
+    _volumeCtrl.dispose();
     super.dispose();
   }
 
@@ -139,11 +163,6 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
       setState(() => _error = 'Product name is required.');
-      return;
-    }
-    final sku = _skuCtrl.text.trim();
-    if (sku.isEmpty) {
-      setState(() => _error = 'SKU is required.');
       return;
     }
     final unit = _unitCtrl.text.trim();
@@ -166,6 +185,10 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
 
     try {
       final barcode = _barcodeCtrl.text.trim();
+      final sku = _skuCtrl.text.trim();
+      final size = _sizeCtrl.text.trim();
+      final weight = _weightCtrl.text.trim();
+      final volume = _volumeCtrl.text.trim();
       final product = await widget.catalogApi.createProduct(
         store: widget.store,
         input: ProductInput(
@@ -173,9 +196,15 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
           brand: _brandCtrl.text.trim().isNotEmpty
               ? _brandCtrl.text.trim()
               : null,
-          sku: sku,
+          variant: _variantCtrl.text.trim().isNotEmpty
+              ? _variantCtrl.text.trim()
+              : null,
+          sku: sku.isNotEmpty ? sku : null,
           barcode: barcode.isNotEmpty ? barcode : null,
           unit: unit,
+          size: size.isNotEmpty ? size : null,
+          weight: weight.isNotEmpty ? weight : null,
+          volume: volume.isNotEmpty ? volume : null,
           sellingPrice: price,
           description: _descCtrl.text.trim().isNotEmpty
               ? _descCtrl.text.trim()
@@ -241,8 +270,9 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
           const SizedBox(height: AppSpacing.lg),
           _buildField(_nameCtrl, 'Product Name *', Icons.label_outline),
           _buildField(_barcodeCtrl, 'Barcode', Icons.qr_code_scanner),
-          _buildField(_skuCtrl, 'SKU *', Icons.inventory_2_outlined),
+          _buildField(_skuCtrl, 'SKU (auto-generated if empty)', Icons.inventory_2_outlined),
           _buildField(_brandCtrl, 'Brand', Icons.branding_watermark_outlined),
+          _buildField(_variantCtrl, 'Variant', Icons.tune),
           _buildField(_categoryCtrl, 'Category', Icons.category_outlined),
           _buildField(_unitCtrl, 'Unit *', Icons.straighten),
           _buildField(
@@ -251,6 +281,26 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
             Icons.attach_money,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
           ),
+          Row(
+            children: [
+              Expanded(
+                child: _buildField(
+                  _sizeCtrl,
+                  'Size',
+                  Icons.aspect_ratio,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _buildField(
+                  _weightCtrl,
+                  'Weight',
+                  Icons.scale,
+                ),
+              ),
+            ],
+          ),
+          _buildField(_volumeCtrl, 'Volume', Icons.water_drop_outlined),
           _buildField(
             _descCtrl,
             'Description',

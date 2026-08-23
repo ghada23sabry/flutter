@@ -2,14 +2,16 @@ import logging
 import subprocess
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import AsyncLoggingSetup
-from app.routers import ai, auth, categories, devices, health, inventory, products, suppliers, users
+from app.routers import ai, auth, categories, devices, health, inventory, products, suppliers, uploads, users
 
 _logging_setup = AsyncLoggingSetup()
 _log = logging.getLogger("visionstock.startup")
@@ -96,3 +98,8 @@ app.include_router(products.router)
 app.include_router(suppliers.router)
 app.include_router(inventory.router)
 app.include_router(ai.router)
+app.include_router(uploads.router)
+
+upload_path = Path(settings.upload_dir)
+upload_path.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(upload_path)), name="uploads")

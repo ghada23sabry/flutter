@@ -1,4 +1,5 @@
 import '../../../core/api_client.dart';
+import '../../../core/cache.dart';
 import '../../../core/models/auth_models.dart';
 import '../../catalog/data/catalog_models.dart';
 import 'inventory_models.dart';
@@ -9,9 +10,11 @@ import 'inventory_models.dart';
 /// the token's accessible stores). Layout/expiry/adjust endpoints are
 /// additionally gated by permissions; missing permission surfaces as 403.
 class InventoryApi {
-  const InventoryApi(this.client);
+  InventoryApi(this.client);
 
   final ApiClient client;
+
+  static const Duration _zoneCacheTtl = Duration(minutes: 5);
 
   String _date(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -132,14 +135,25 @@ class InventoryApi {
   Future<List<Zone>> listZones({
     required StoreInfo store,
     String? status,
+    bool forceRefresh = false,
   }) async {
-    final items = await client.getList(
-      '/inventory/zones',
-      query: {'store_id': store.id, 'status': ?status},
+    final cacheKey = 'zones:${store.id}:${status ?? 'all'}';
+    if (forceRefresh) {
+      AppCache.instance.invalidate(cacheKey);
+    }
+    return AppCache.instance.get<List<Zone>>(
+      cacheKey,
+      _zoneCacheTtl,
+      () async {
+        final items = await client.getList(
+          '/inventory/zones',
+          query: {'store_id': store.id, 'status': ?status},
+        );
+        return [
+          for (final item in items) Zone.fromJson(item as Map<String, dynamic>),
+        ];
+      },
     );
-    return [
-      for (final item in items) Zone.fromJson(item as Map<String, dynamic>),
-    ];
   }
 
   Future<Zone> getZone({
@@ -163,6 +177,7 @@ class InventoryApi {
       query: {'store_id': store.id},
       body: {'name': name, if (code != null && code.isNotEmpty) 'code': code},
     );
+    AppCache.instance.invalidatePrefix('zones:${store.id}');
     return Zone.fromJson(json);
   }
 
@@ -178,6 +193,7 @@ class InventoryApi {
       query: {'store_id': store.id},
       body: {'name': ?name, 'code': ?code, 'status': ?status},
     );
+    AppCache.instance.invalidatePrefix('zones:${store.id}');
     return Zone.fromJson(json);
   }
 

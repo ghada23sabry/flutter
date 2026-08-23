@@ -415,7 +415,13 @@ class _AiCountScreenState extends State<AiCountScreen> {
       sku: detection.detectedSku,
       category: detection.metaCategory,
       brand: detection.metaBrand,
+      variant: detection.metaVariant,
+      modelName: detection.metaModelName,
       description: detection.metaDescription,
+      size: detection.metaSize,
+      weight: detection.metaWeight,
+      volume: detection.metaVolume,
+      sellingPrice: detection.metaSellingPrice,
       detectedQuantity: detection.quantityDetected,
     );
     final result = await Navigator.of(context).push<UnknownProductCreated>(

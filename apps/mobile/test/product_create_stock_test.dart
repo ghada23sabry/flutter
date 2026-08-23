@@ -219,7 +219,7 @@ class _FakeApi {
 }
 
 Future<void> _login(WidgetTester tester, ApiClient apiClient) async {
-  tester.view.physicalSize = const Size(800, 1600);
+  tester.view.physicalSize = const Size(800, 3200);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -246,7 +246,7 @@ Future<void> _openCreateForm(WidgetTester tester) async {
 
 Future<void> _fillRequiredFields(WidgetTester tester) async {
   await tester.enterText(find.widgetWithText(TextField, 'Name *'), 'Widget');
-  await tester.enterText(find.widgetWithText(TextField, 'SKU *'), 'SKU-9');
+  await tester.enterText(find.widgetWithText(TextField, 'SKU (auto if empty)'), 'SKU-9');
   await tester.enterText(find.widgetWithText(TextField, 'Unit *'), 'pcs');
   await tester.enterText(
     find.widgetWithText(TextField, 'Selling price *'),

@@ -64,10 +64,15 @@ class Product(Base):
     category_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(200))
     brand: Mapped[str | None] = mapped_column(String(200))
+    variant: Mapped[str | None] = mapped_column(String(120))
+    model_name: Mapped[str | None] = mapped_column(String(120))
     sku: Mapped[str] = mapped_column(String(64))
     barcode: Mapped[str | None] = mapped_column(String(64))
     description: Mapped[str | None] = mapped_column(Text)
     unit: Mapped[str] = mapped_column(String(20))
+    size: Mapped[str | None] = mapped_column(String(60))
+    weight: Mapped[str | None] = mapped_column(String(60))
+    volume: Mapped[str | None] = mapped_column(String(60))
     cost_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal(0))
     selling_price: Mapped[Decimal] = mapped_column(Numeric(14, 2))
     reorder_point: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal(0))
@@ -148,3 +153,23 @@ class SupplierProduct(Base):
 
     supplier: Mapped[Supplier] = relationship(back_populates="product_links")
     product: Mapped[Product] = relationship(back_populates="supplier_links")
+
+
+class SkuSetting(Base):
+    __tablename__ = "sku_settings"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "store_id", name="uq_sku_settings_tenant_store"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    store_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"), index=True)
+    prefix: Mapped[str] = mapped_column(String(20), default="SKU")
+    separator: Mapped[str] = mapped_column(String(5), default="-")
+    counter_length: Mapped[int] = mapped_column(Integer, default=5)
+    next_counter: Mapped[int] = mapped_column(Integer, default=1)
+    category_prefix: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )
