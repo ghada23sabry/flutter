@@ -67,6 +67,7 @@ EXPECTED_TABLES = {
     "scan_detections",
     "scan_reconciliations",
     "product_recognitions",
+    "product_visual_recognitions",
 }
 
 AI_PERMISSIONS = {"ai.scan", "ai.reconcile", "ai.confirm", "ai.view"}
@@ -145,7 +146,7 @@ def _run_alembic(db_url: str) -> subprocess.CompletedProcess:
 
 async def _assert_schema(conn: asyncpg.Connection) -> None:
     version = await conn.fetchval("SELECT version_num FROM alembic_version")
-    assert version == "0009", f"expected alembic head 0009, got {version!r}"
+    assert version == "0010", f"expected alembic head 0010, got {version!r}"
 
     tables = {
         row[0]

@@ -49,6 +49,7 @@ from app.models import (
     Inventory,
     Product,
     ProductRecognition,
+    ProductVisualRecognition,
     ScanDetection,
     ScanReconciliation,
     ScanSession,
@@ -56,7 +57,7 @@ from app.models import (
     StockMovement,
     Store,
 )
-from app.services.catalog_service import normalize_barcode
+from app.services.catalog_service import normalize_barcode, normalize_product_name
 
 SESSION_STATUS_PROCESSING = "processing"
 SESSION_STATUS_COMPLETED = "completed"
@@ -576,6 +577,31 @@ async def confirm_scan_session(
                 actor_id=actor_id,
             )
 
+        # Step 8: write visual recognition memory for every confirmed
+        # detection that has name metadata and a resolved product.  This
+        # lets future camera scans re-identify non-barcode products.
+        visual_dets = (
+            await db.execute(
+                select(ScanDetection).where(
+                    ScanDetection.session_id == session_id,
+                    ScanDetection.tenant_id == tenant_id,
+                    ScanDetection.store_id == store_id,
+                    ScanDetection.product_id.isnot(None),
+                )
+            )
+        ).scalars().all()
+        for det in visual_dets:
+            await _write_visual_recognition_from_detection(
+                db,
+                tenant_id=tenant_id,
+                store_id=store_id,
+                product_id=det.product_id,
+                meta=det.meta,
+                confidence=det.confidence,
+                source="user_confirm",
+                actor_id=actor_id,
+            )
+
         session.status = SESSION_STATUS_CONFIRMED
         await write_audit(
             db,
@@ -669,6 +695,104 @@ async def _upsert_recognition(
         )
 
 
+async def _upsert_visual_recognition(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    store_id: uuid.UUID,
+    product_id: uuid.UUID,
+    normalized_name: str,
+    brand: str | None,
+    source: str,
+    confidence: Decimal | None,
+    actor_id: uuid.UUID | None,
+) -> None:
+    """Write (or bump) a visual/name→product recognition memory row.
+
+    Called on confirm and link to remember confirmed visual identity mappings
+    for future camera scans.  Upserts on the unique constraint
+    (tenant, store, normalized_name): if the mapping already exists,
+    hit_count is incremented, the average confidence is updated using an
+    incremental mean, and the timestamp is refreshed.
+    """
+    existing = (
+        await db.execute(
+            select(ProductVisualRecognition).where(
+                ProductVisualRecognition.tenant_id == tenant_id,
+                ProductVisualRecognition.store_id == store_id,
+                ProductVisualRecognition.normalized_name == normalized_name,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        existing.product_id = product_id
+        if brand:
+            existing.brand = brand
+        existing.source = source
+        existing.hit_count += 1
+        if confidence is not None:
+            if existing.avg_confidence is not None:
+                existing.avg_confidence = (
+                    (existing.avg_confidence * (existing.hit_count - 1) + confidence)
+                    / existing.hit_count
+                )
+            else:
+                existing.avg_confidence = confidence
+        if actor_id is not None:
+            existing.created_by = actor_id
+    else:
+        db.add(
+            ProductVisualRecognition(
+                tenant_id=tenant_id,
+                store_id=store_id,
+                product_id=product_id,
+                normalized_name=normalized_name,
+                brand=brand,
+                source=source,
+                avg_confidence=confidence,
+                created_by=actor_id,
+            )
+        )
+
+
+async def _write_visual_recognition_from_detection(
+    db: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    store_id: uuid.UUID,
+    product_id: uuid.UUID,
+    meta: dict | None,
+    confidence: Decimal | None,
+    source: str,
+    actor_id: uuid.UUID | None,
+) -> None:
+    """Write visual recognition memory from a detection's AI metadata.
+
+    Extracts the product name and brand from the detection metadata and
+    writes a visual recognition memory row if a name is available.
+    """
+    if not meta:
+        return
+    name = meta.get("name")
+    if not name:
+        return
+    normalized = normalize_product_name(name)
+    if not normalized:
+        return
+    brand = meta.get("brand")
+    await _upsert_visual_recognition(
+        db,
+        tenant_id=tenant_id,
+        store_id=store_id,
+        product_id=product_id,
+        normalized_name=normalized,
+        brand=brand or None,
+        source=source,
+        confidence=confidence,
+        actor_id=actor_id,
+    )
+
+
 async def _resolve_product(
     db: AsyncSession, tenant_id: uuid.UUID, store_id: uuid.UUID, item: DetectedItem
 ) -> Product | None:
@@ -679,15 +803,18 @@ async def _resolve_product(
     2. Recognition memory (previously confirmed barcode→product mapping)
     3. External barcode enrichment (Open Food Facts) → name match
     4. Local SKU exact match
-    5. Visual/name match from vision metadata
-    6. Unknown product workflow (returns None → user creates product)
+    5. Visual/name match from vision metadata (exact name in catalog)
+    6. Brand + product-name match from vision metadata (catalog)
+    7. Visual recognition memory (previously confirmed name→product)
+    8. Fuzzy name match from vision metadata (high-threshold word overlap)
+    9. Unknown product workflow (returns None → user creates product)
 
     Returns None when unresolved — the caller flags the detection for review.
     """
+    # ── 1. Local barcode exact match (fastest, most deterministic) ─────────
     if item.detected_barcode is not None:
         normalized = normalize_barcode(item.detected_barcode)
 
-        # 1. Local barcode exact match (fastest, most deterministic)
         product = (
             await db.execute(
                 select(Product).where(
@@ -700,11 +827,7 @@ async def _resolve_product(
         if product is not None:
             return product
 
-        # 2. Recognition memory — a previously confirmed barcode→product
-        #    mapping from the same (tenant, store).  This is a fast local
-        #    DB lookup that avoids a network call.  Scoped to (tenant, store)
-        #    so the same barcode can map to different products at different
-        #    stores.  If the remembered product was deactivated, fall through.
+        # ── 2. Recognition memory — previously confirmed barcode→product ──
         memory = (
             await db.execute(
                 select(ProductRecognition).where(
@@ -729,18 +852,14 @@ async def _resolve_product(
                 memory.hit_count += 1
                 return product
 
-        # 3. External barcode enrichment — when the local catalog doesn't
-        #    contain this barcode, query Open Food Facts.  If the external
-        #    source returns a name, use it for the name-match step below
-        #    (step 5).  We never auto-create products here; the caller can
-        #    decide whether to surface the enriched data to the user.
+        # ── 3. External barcode enrichment → name match ────────────────────
         off = await enrich_barcode_off(normalized)
         if off.has_name:
             product = await _resolve_product_by_name(db, tenant_id, store_id, off.name)
             if product is not None:
                 return product
 
-    # 4. Local SKU exact match
+    # ── 4. Local SKU exact match ──────────────────────────────────────────
     if item.detected_sku is not None:
         sku = item.detected_sku.strip()
         product = (
@@ -755,13 +874,37 @@ async def _resolve_product(
         if product is not None:
             return product
 
-    # M4-B: visual/name matching — extract a product name from the vision
-    # adapter's metadata and try a case-insensitive substring match within the
-    # store.  The vision adapter must never set product_id directly; the
-    # service layer always owns identity resolution.
+    # ── 5-8: Visual/name-based resolution from vision metadata ────────────
     detected_name = (item.meta or {}).get("name")
+    detected_brand = (item.meta or {}).get("brand")
+
     if detected_name:
+        # ── 5. Exact name match in catalog (case-insensitive) ──────────────
         product = await _resolve_product_by_name(db, tenant_id, store_id, detected_name)
+        if product is not None:
+            return product
+
+        # ── 6. Brand + product-name match in catalog ───────────────────────
+        if detected_brand:
+            product = await _resolve_product_by_brand_name(
+                db, tenant_id, store_id, detected_name, detected_brand
+            )
+            if product is not None:
+                return product
+
+        # ── 7. Visual recognition memory (previously confirmed) ────────────
+        normalized = normalize_product_name(detected_name)
+        if normalized:
+            product = await _resolve_by_visual_recognition(
+                db, tenant_id, store_id, normalized
+            )
+            if product is not None:
+                return product
+
+        # ── 8. Fuzzy name match (high-threshold word overlap) ──────────────
+        product = await _resolve_product_by_fuzzy_name(
+            db, tenant_id, store_id, detected_name
+        )
         if product is not None:
             return product
 
@@ -824,6 +967,126 @@ async def _resolve_product_by_name(
 
     # Require a minimum overlap — at least 2 matching words or one containment
     if best_score >= 2 and best_product is not None:
+        return best_product
+    return None
+
+
+async def _resolve_product_by_brand_name(
+    db: AsyncSession, tenant_id: uuid.UUID, store_id: uuid.UUID, name: str, brand: str
+) -> Product | None:
+    """Match a product by brand + name within a store.
+
+    Requires both brand AND name to match.  The brand is matched exactly
+    (case-insensitive) and the name uses the same word-overlap scoring as
+    _resolve_product_by_name but with a lower threshold (1 word match
+    instead of 2) since the brand adds specificity.
+    """
+    brand_lower = brand.strip().lower()
+    if not brand_lower:
+        return None
+
+    # 1. Try exact brand match with name containment
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.tenant_id == tenant_id,
+                Product.store_id == store_id,
+                Product.brand.ilike(brand_lower),
+                Product.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if product is not None:
+        # Check name overlap with this brand-matched product
+        name_lower = name.strip().lower()
+        pname = product.name.lower()
+        if name_lower in pname or pname in name_lower:
+            return product
+        name_words = [w for w in name_lower.split() if len(w) >= 2]
+        if name_words and sum(1 for w in name_words if w in pname) >= 1:
+            return product
+
+    return None
+
+
+async def _resolve_by_visual_recognition(
+    db: AsyncSession, tenant_id: uuid.UUID, store_id: uuid.UUID, normalized_name: str
+) -> Product | None:
+    """Look up a product via visual recognition memory.
+
+    Checks if this exact normalized name has been previously confirmed
+    through the AI scan workflow and maps to an active product.
+    """
+    if not normalized_name:
+        return None
+
+    memory = (
+        await db.execute(
+            select(ProductVisualRecognition).where(
+                ProductVisualRecognition.tenant_id == tenant_id,
+                ProductVisualRecognition.store_id == store_id,
+                ProductVisualRecognition.normalized_name == normalized_name,
+            )
+        )
+    ).scalar_one_or_none()
+    if memory is None:
+        return None
+
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == memory.product_id,
+                Product.tenant_id == tenant_id,
+                Product.store_id == store_id,
+                Product.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if product is not None:
+        memory.hit_count += 1
+        return product
+    return None
+
+
+async def _resolve_product_by_fuzzy_name(
+    db: AsyncSession, tenant_id: uuid.UUID, store_id: uuid.UUID, name: str
+) -> Product | None:
+    """Fuzzy name match with a high confidence threshold.
+
+    Uses word-overlap scoring but requires at least 3 matching words or
+    strong containment to avoid false positives.  This is deliberately
+    conservative — uncertain matches should remain unresolved.
+    """
+    products = (
+        await db.execute(
+            select(Product).where(
+                Product.tenant_id == tenant_id,
+                Product.store_id == store_id,
+                Product.status == "active",
+            )
+        )
+    ).scalars().all()
+    if not products:
+        return None
+
+    name_lower = name.strip().lower()
+    best_product: Product | None = None
+    best_score = 0
+    for p in products:
+        pname = p.name.lower()
+        name_words = [w for w in name_lower.split() if len(w) >= 2]
+        if not name_words:
+            continue
+        score = sum(1 for w in name_words if w in pname)
+        # Strong containment bonus
+        if name_lower in pname or pname in name_lower:
+            score += 3
+        if score > best_score:
+            best_score = score
+            best_product = p
+
+    # Require high confidence: at least 3 matching words, or strong containment
+    if best_score >= 3 and best_product is not None:
         return best_product
     return None
 
@@ -946,6 +1209,18 @@ async def link_detection_to_product(
             source="link",
             actor_id=actor_id,
         )
+
+    # Step 5b: write visual recognition memory if this detection has name metadata.
+    await _write_visual_recognition_from_detection(
+        db,
+        tenant_id=tenant_id,
+        store_id=store_id,
+        product_id=product_id,
+        meta=detection.meta,
+        confidence=detection.confidence,
+        source="link",
+        actor_id=actor_id,
+    )
 
     # ── 6. Rebuild reconciliation for this product ────────────────────────
     all_dets = (

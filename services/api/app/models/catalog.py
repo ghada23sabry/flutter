@@ -63,6 +63,7 @@ class Product(Base):
     store_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("stores.id", ondelete="CASCADE"), index=True)
     category_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), index=True)
     name: Mapped[str] = mapped_column(String(200))
+    brand: Mapped[str | None] = mapped_column(String(200))
     sku: Mapped[str] = mapped_column(String(64))
     barcode: Mapped[str | None] = mapped_column(String(64))
     description: Mapped[str | None] = mapped_column(Text)

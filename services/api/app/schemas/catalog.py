@@ -49,6 +49,7 @@ class CategoryOut(BaseModel):
 class ProductIn(BaseModel):
     category_id: uuid.UUID | None = None
     name: str = Field(min_length=1, max_length=200)
+    brand: str | None = Field(default=None, max_length=200)
     sku: str = Field(min_length=1, max_length=64)
     barcode: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=5000)
@@ -64,6 +65,7 @@ class ProductIn(BaseModel):
 class ProductUpdate(BaseModel):
     category_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    brand: str | None = Field(default=None, max_length=200)
     sku: str | None = Field(default=None, min_length=1, max_length=64)
     barcode: str | None = Field(default=None, max_length=64)
     description: str | None = Field(default=None, max_length=5000)
@@ -87,6 +89,7 @@ class ProductOut(BaseModel):
     sku: str
     barcode: str | None
     name: str
+    brand: str | None = None
     description: str | None
     unit: str
     cost_price: Decimal

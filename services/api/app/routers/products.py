@@ -117,6 +117,7 @@ async def create_product(
         store_id=store_id,
         category_id=body.category_id,
         name=clean_required(body.name, "name"),
+        brand=body.brand.strip() if body.brand else None,
         sku=clean_required(body.sku, "sku"),
         barcode=normalize_barcode(body.barcode),
         description=body.description.strip() if body.description else None,
@@ -142,7 +143,7 @@ async def create_product(
         tenant_id=ctx.tenant.id,
         store_id=store_id,
         user_id=ctx.user.id,
-        after={"name": product.name, "sku": product.sku, "barcode": product.barcode},
+        after={"name": product.name, "sku": product.sku, "barcode": product.barcode, "brand": product.brand},
     )
     await db.commit()
     await db.refresh(product)
@@ -244,7 +245,7 @@ async def update_product(
     store_id: Annotated[uuid.UUID, Query()],
 ):
     product = await get_scoped_product(db, ctx, store_id, product_id)
-    before = {"name": product.name, "sku": product.sku, "barcode": product.barcode, "status": product.status}
+    before = {"name": product.name, "sku": product.sku, "barcode": product.barcode, "brand": product.brand, "status": product.status}
     updates = body.model_dump(exclude_unset=True)
     if "category_id" in updates:
         if updates["category_id"] is not None:
@@ -252,6 +253,8 @@ async def update_product(
         product.category_id = updates["category_id"]
     if "name" in updates and updates["name"] is not None:
         product.name = clean_required(updates["name"], "name")
+    if "brand" in updates:
+        product.brand = updates["brand"].strip() if updates["brand"] else None
     if "sku" in updates and updates["sku"] is not None:
         product.sku = clean_required(updates["sku"], "sku")
     if "barcode" in updates:
@@ -288,7 +291,7 @@ async def update_product(
         store_id=store_id,
         user_id=ctx.user.id,
         before=before,
-        after={"name": product.name, "sku": product.sku, "barcode": product.barcode, "status": product.status},
+        after={"name": product.name, "sku": product.sku, "barcode": product.barcode, "brand": product.brand, "status": product.status},
     )
     await db.commit()
     await db.refresh(product)

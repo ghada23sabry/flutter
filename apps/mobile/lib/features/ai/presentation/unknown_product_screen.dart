@@ -170,6 +170,9 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
         store: widget.store,
         input: ProductInput(
           name: name,
+          brand: _brandCtrl.text.trim().isNotEmpty
+              ? _brandCtrl.text.trim()
+              : null,
           sku: sku,
           barcode: barcode.isNotEmpty ? barcode : null,
           unit: unit,

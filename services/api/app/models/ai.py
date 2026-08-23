@@ -198,3 +198,54 @@ class ProductRecognition(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
     )
+
+
+class ProductVisualRecognition(Base):
+    """Visual/name-based product recognition memory.
+
+    Stores confirmed visual identity mappings scoped to (tenant, store).
+    Written when a detection with name/brand metadata is confirmed via
+    user confirmation or linking. Used as a fallback lookup when barcode
+    and SKU resolution fail during future camera scans.
+
+    Scoped to (tenant, store) — the same product name may map to different
+    products at different stores.  ``normalized_name`` is the lowercased,
+    trimmed, whitespace-collapsed form of the detected product name.
+    """
+
+    __tablename__ = "product_visual_recognitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "store_id", "normalized_name",
+            name="uq_product_visual_rec_tenant_store_name",
+        ),
+        Index("ix_product_visual_rec_tenant_store", "tenant_id", "store_id"),
+        Index("ix_product_visual_rec_normalized_name", "normalized_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tenants.id", ondelete="CASCADE"), index=True
+    )
+    store_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("stores.id", ondelete="CASCADE"), index=True
+    )
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), index=True
+    )
+    normalized_name: Mapped[str] = mapped_column(String(200))
+    brand: Mapped[str | None] = mapped_column(String(200))
+    source: Mapped[str] = mapped_column(
+        String(30), default="user_confirm"
+    )  # user_confirm | link
+    hit_count: Mapped[int] = mapped_column(Integer, default=1)
+    avg_confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, server_default=func.now()
+    )

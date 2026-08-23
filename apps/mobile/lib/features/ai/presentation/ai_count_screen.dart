@@ -518,7 +518,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
 
     if (product == null) {
       // Flow D — unknown product: let the user review and create it.
-      final created = await Navigator.of(context).push(
+      final created = await Navigator.of(context).push<UnknownProductCreated>(
         MaterialPageRoute(
           builder: (_) => UnknownProductScreen(
             catalogApi: catalogApi,
@@ -530,9 +530,9 @@ class _AiCountScreenState extends State<AiCountScreen> {
         ),
       );
       if (created != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Product "${created.product.name}" created.')),
-        );
+        // Product created — continue directly to the operation dialog
+        // so the user doesn't need to re-scan the barcode.
+        await _showBarcodeOperationDialog(created.product);
       }
       return;
     }

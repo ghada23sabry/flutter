@@ -22,6 +22,7 @@ class Product {
     required this.sku,
     this.barcode,
     required this.name,
+    this.brand,
     this.description,
     required this.unit,
     required this.costPrice,
@@ -43,6 +44,7 @@ class Product {
     sku: json['sku'] as String? ?? '',
     barcode: json['barcode'] as String?,
     name: json['name'] as String,
+    brand: json['brand'] as String?,
     description: json['description'] as String?,
     unit: json['unit'] as String? ?? '',
     costPrice: _toDouble(json['cost_price']),
@@ -63,6 +65,7 @@ class Product {
   final String sku;
   final String? barcode;
   final String name;
+  final String? brand;
   final String? description;
   final String unit;
   final double costPrice;
@@ -88,6 +91,7 @@ class Product {
     'sku': sku,
     'barcode': barcode,
     'name': name,
+    'brand': brand,
     'description': description,
     'unit': unit,
     'cost_price': costPrice,
@@ -107,6 +111,7 @@ class ProductInput {
   const ProductInput({
     this.categoryId,
     required this.name,
+    this.brand,
     required this.sku,
     this.barcode,
     this.description,
@@ -121,6 +126,7 @@ class ProductInput {
 
   final String? categoryId;
   final String name;
+  final String? brand;
   final String sku;
   final String? barcode;
   final String? description;
@@ -135,6 +141,7 @@ class ProductInput {
   Map<String, dynamic> toJson() => {
     if (categoryId != null) 'category_id': categoryId,
     'name': name,
+    if (brand != null) 'brand': brand,
     'sku': sku,
     if (barcode != null) 'barcode': barcode,
     if (description != null) 'description': description,
@@ -155,6 +162,7 @@ class ProductUpdate {
     this.categoryId,
     this.clearCategory = false,
     this.name,
+    this.brand,
     this.sku,
     this.barcode,
     this.clearBarcode = false,
@@ -175,6 +183,7 @@ class ProductUpdate {
   /// category during an edit (distinct from "field not supplied").
   final bool clearCategory;
   final String? name;
+  final String? brand;
   final String? sku;
   final String? barcode;
 
@@ -197,6 +206,7 @@ class ProductUpdate {
     else if (clearCategory)
       'category_id': null,
     if (name != null) 'name': name,
+    if (brand != null) 'brand': brand,
     if (sku != null) 'sku': sku,
     if (barcode != null)
       'barcode': barcode
