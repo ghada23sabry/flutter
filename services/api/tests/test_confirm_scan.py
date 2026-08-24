@@ -46,13 +46,14 @@ REF_SCAN_SESSION = "SCAN_SESSION"
 
 async def _confirm(creds: dict, session_id, *, actor_id=None):
     async with SessionLocal() as db:
-        return await confirm_scan_session(
+        result = await confirm_scan_session(
             db,
             tenant_id=creds["tenant_id"],
             store_id=creds["store_id"],
             session_id=session_id,
             actor_id=actor_id or creds["user_id"],
         )
+        return result.session
 
 
 async def _count_movements(store_id, session_id):

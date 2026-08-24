@@ -32,6 +32,7 @@ Hard rules enforced here:
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -106,6 +107,16 @@ OPERATION_MOVEMENT_NOTES = {
     SCAN_OPERATION_RECEIVE: "Confirmed stock receiving",
     SCAN_OPERATION_SALE: "Confirmed quick sale",
 }
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmResult:
+    """Return type for confirm_scan_session — session + mutation counts."""
+
+    session: ScanSession
+    products_updated: int
+    total_detections: int
+    unmatched_detections: int
 
 
 class ScanProcessingFailed(AppError):
@@ -394,7 +405,7 @@ async def confirm_scan_session(
     store_id: uuid.UUID,
     session_id: uuid.UUID,
     actor_id: uuid.UUID | None,
-) -> ScanSession:
+) -> ConfirmResult:
     """Explicitly confirm a scan and apply its reconciled counts to stock.
 
     This is the ONLY path that turns an AI scan into an inventory change. The
@@ -603,6 +614,21 @@ async def confirm_scan_session(
             )
 
         session.status = SESSION_STATUS_CONFIRMED
+
+        # Count detections for the response so the client can display accurate
+        # numbers without an extra round-trip.
+        all_dets_for_count = (
+            await db.execute(
+                select(ScanDetection).where(
+                    ScanDetection.session_id == session_id,
+                    ScanDetection.tenant_id == tenant_id,
+                    ScanDetection.store_id == store_id,
+                )
+            )
+        ).scalars().all()
+        total_detections = len(all_dets_for_count)
+        unmatched_detections = sum(1 for d in all_dets_for_count if d.product_id is None)
+
         await write_audit(
             db,
             action="scan_confirmed",
@@ -623,7 +649,12 @@ async def confirm_scan_session(
     except Exception:
         await db.rollback()
         raise
-    return session
+    return ConfirmResult(
+        session=session,
+        products_updated=len(applied),
+        total_detections=total_detections,
+        unmatched_detections=unmatched_detections,
+    )
 
 
 def _variance_for(operation: str, detected: Decimal, system_quantity: Decimal) -> Decimal:

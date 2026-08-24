@@ -1,4 +1,5 @@
 from app.schemas.ai import (
+    ConfirmScanResponse,
     DetectionIn,
     DetectionLink,
     DetectionOut,
@@ -76,6 +77,7 @@ __all__ = [
     "CategoryIn",
     "CategoryOut",
     "CategoryUpdate",
+    "ConfirmScanResponse",
     "DetectionIn",
     "DetectionLink",
     "DetectionOut",

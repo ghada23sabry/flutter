@@ -347,11 +347,17 @@ class _AiCountScreenState extends State<AiCountScreen> {
         setState(() => _reconciliations = reconciliations);
       }
       if (!mounted) return;
-      setState(
-        () => _state = session.isNeedsReview
-            ? AiScanUiState.needsReview
-            : AiScanUiState.readyToConfirm,
-      );
+      // Don't overwrite a terminal state (confirmed/failed/cancelled) —
+      // _loadResults may be called after confirm to refresh reconciliation
+      // data, but the UI state is already settled.
+      if (_state != AiScanUiState.confirmed &&
+          _state != AiScanUiState.failed) {
+        setState(
+          () => _state = session.isNeedsReview
+              ? AiScanUiState.needsReview
+              : AiScanUiState.readyToConfirm,
+        );
+      }
     } on ApiException catch (e) {
       _fail(kDebugMode ? '[${e.statusCode}] ${e.message}' : e.message);
     } catch (_) {
@@ -1522,9 +1528,34 @@ class _AiCountScreenState extends State<AiCountScreen> {
   Widget _buildSuccess() {
     final session = _session;
     final scheme = Theme.of(context).colorScheme;
-    final affected = _reconciliations
-        .where((r) => r.hasVariance && !r.isIgnored)
-        .length;
+
+    // Prefer server-reported counts (from ConfirmScanResponse) for accuracy.
+    final int affected;
+    final String message;
+    if (session != null && session.productsUpdated != null) {
+      affected = session.productsUpdated!;
+      final totalDet = session.totalDetections ?? 0;
+      final unmatched = session.unmatchedDetections ?? 0;
+      if (affected == 0 && totalDet > 0 && unmatched == totalDet) {
+        message =
+            '${session.imageCount} image(s) processed.\n'
+            'No products were matched. Create products from detections first, then re-scan.';
+      } else if (affected == 0 && totalDet > 0) {
+        message =
+            '${session.imageCount} image(s) processed.\n'
+            'All matched products already had the correct quantity.';
+      } else {
+        message =
+            '${session.imageCount} image(s) processed · $affected product(s) updated.';
+      }
+    } else {
+      // Fallback to client-side count (legacy responses).
+      affected = _reconciliations
+          .where((r) => r.hasVariance && !r.isIgnored)
+          .length;
+      message =
+          '${session?.imageCount ?? 0} image(s) processed · $affected product(s) updated.';
+    }
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.xl),
@@ -1539,9 +1570,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              session == null
-                  ? _successMessage
-                  : '${session.imageCount} image(s) processed · $affected product(s) updated.',
+              session == null ? _successMessage : message,
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,

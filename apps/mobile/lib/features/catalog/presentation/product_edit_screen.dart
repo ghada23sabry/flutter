@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/api_client.dart';
 import '../../../core/barcode/barcode.dart';
@@ -132,6 +133,96 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
       : value.toString();
 
   String _decimalInput(double value) => value.toString();
+
+  // ── Image upload ────────────────────────────────────────────────────────
+
+  final _imagePicker = ImagePicker();
+
+  Future<void> _pickImageCamera() async {
+    final picked = await _imagePicker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85,
+    );
+    if (picked != null && mounted) {
+      await _uploadImage(picked.path);
+    }
+  }
+
+  Future<void> _pickImageGallery() async {
+    final picked = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 85,
+    );
+    if (picked != null && mounted) {
+      await _uploadImage(picked.path);
+    }
+  }
+
+  Future<void> _uploadImage(String filePath) async {
+    if (!_isEditing || widget.existing == null) return;
+    try {
+      setState(() => _submitting = true);
+      await widget.api.uploadProductImage(
+        store: _store,
+        productId: widget.existing!.id,
+        filePath: filePath,
+      );
+      // Refresh product to get the new image URL.
+      final refreshed = await widget.api.getProduct(
+        store: _store,
+        id: widget.existing!.id,
+      );
+      if (mounted) {
+        setState(() {
+          _imageUrl.text = refreshed.imageUrl ?? '';
+          _submitting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image uploaded.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: ${e.message}')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Upload failed. Check your connection.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteImage() async {
+    if (!_isEditing || widget.existing == null) return;
+    try {
+      await widget.api.deleteProductImage(
+        store: _store,
+        productId: widget.existing!.id,
+      );
+      if (mounted) {
+        setState(() => _imageUrl.text = '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Image removed.')),
+        );
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: ${e.message}')),
+        );
+      }
+    }
+  }
 
   String? get _currentCategoryName {
     for (final c in _categories) {
@@ -690,12 +781,54 @@ class _ProductEditScreenState extends State<ProductEditScreen> {
               _SectionCard(
                 title: 'Media & status',
                 children: [
-                  AppInput(
-                    label: 'Image URL',
-                    hintText: 'https://…',
-                    controller: _imageUrl,
-                    keyboardType: TextInputType.url,
-                    textInputAction: TextInputAction.done,
+                  if (_imageUrl.text.isNotEmpty) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(
+                        _imageUrl.text,
+                        height: 120,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 120,
+                          width: double.infinity,
+                          color: scheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _deleteImage,
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: const Text('Remove image'),
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _submitting ? null : _pickImageCamera,
+                          icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                          label: const Text('Take Photo'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _submitting ? null : _pickImageGallery,
+                          icon: const Icon(Icons.photo_library_outlined, size: 18),
+                          label: const Text('Gallery'),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: AppSpacing.md),
                   SwitchListTile(

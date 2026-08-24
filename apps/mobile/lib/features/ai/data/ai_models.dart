@@ -76,7 +76,7 @@ DateTime? _toNullableDateTime(Object? value) =>
     ? (DateTime.tryParse(value) ?? DateTime.fromMillisecondsSinceEpoch(0))
     : null;
 
-/// A scan session (`ScanSessionOut`).
+/// A scan session (`ScanSessionOut` or `ConfirmScanResponse`).
 class ScanSession {
   const ScanSession({
     required this.id,
@@ -91,6 +91,9 @@ class ScanSession {
     required this.createdAt,
     required this.updatedAt,
     this.completedAt,
+    this.productsUpdated,
+    this.totalDetections,
+    this.unmatchedDetections,
   });
 
   factory ScanSession.fromJson(Map<String, dynamic> json) => ScanSession(
@@ -106,6 +109,9 @@ class ScanSession {
     createdAt: _toDateTime(json['created_at']),
     updatedAt: _toDateTime(json['updated_at']),
     completedAt: _toNullableDateTime(json['completed_at']),
+    productsUpdated: json['products_updated'] as int?,
+    totalDetections: json['total_detections'] as int?,
+    unmatchedDetections: json['unmatched_detections'] as int?,
   );
 
   final String id;
@@ -120,6 +126,12 @@ class ScanSession {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? completedAt;
+
+  /// Server-reported count of products whose inventory was actually mutated.
+  /// Only populated from ConfirmScanResponse (POST /confirm).
+  final int? productsUpdated;
+  final int? totalDetections;
+  final int? unmatchedDetections;
 
   bool get isProcessing => status == ScanStatus.processing;
   bool get isCompleted => status == ScanStatus.completed;

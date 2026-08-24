@@ -11,6 +11,7 @@ the service layer's responsibility.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -24,6 +25,11 @@ from app.ai.contract import DetectedItem, VisionContext
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Retry configuration for transient vision API failures.
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY_S = 1.0
+_RETRY_MAX_DELAY_S = 10.0
 
 # ---------------------------------------------------------------------------
 # Image format detection (magic bytes)
@@ -220,6 +226,8 @@ def _build_provider() -> VisionProvider | None:
 # Response parser
 # ---------------------------------------------------------------------------
 
+_PRICE_RE = re.compile(r"[\d]+(?:[.,]\d{1,2})?")
+
 
 def _safe_decimal(value: str | float | None, default: str = "0") -> Decimal:
     """Best-effort Decimal conversion; returns default on failure."""
@@ -229,6 +237,51 @@ def _safe_decimal(value: str | float | None, default: str = "0") -> Decimal:
         return Decimal(str(value))
     except (ValueError, TypeError):
         return Decimal(default)
+
+
+def _normalize_size(value: str | None) -> str | None:
+    """Normalize a size string (e.g. '500ml', 'Large')."""
+    if not value:
+        return None
+    v = str(value).strip()
+    return v if v else None
+
+
+def _normalize_weight(value: str | None) -> str | None:
+    """Normalize a weight string (e.g. '250g', '1.5 kg')."""
+    if not value:
+        return None
+    v = str(value).strip()
+    return v if v else None
+
+
+def _normalize_volume(value: str | None) -> str | None:
+    """Normalize a volume string (e.g. '750ml', '1.5L')."""
+    if not value:
+        return None
+    v = str(value).strip()
+    return v if v else None
+
+
+def _parse_price(value: str | float | None) -> Decimal | None:
+    """Extract a numeric price from strings like '€5.50', '$12.99', '12.99'.
+
+    Returns None when no numeric price can be extracted.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    match = _PRICE_RE.search(s)
+    if not match:
+        return None
+    num_str = match.group(0).replace(",", ".")
+    try:
+        price = Decimal(num_str)
+        return price if price > 0 else None
+    except (ValueError, TypeError):
+        return None
 
 
 def _parse_items(raw: str) -> list[DetectedItem]:
@@ -271,10 +324,23 @@ def _parse_items(raw: str) -> list[DetectedItem]:
                 qty = Decimal(1)
             meta: dict = {}
             for key in ("name", "brand", "category", "ocr_text", "description",
-                        "variant", "model_name", "size", "weight", "volume", "selling_price"):
+                        "variant", "model_name"):
                 val = entry.get(key)
                 if val is not None and str(val).strip():
                     meta[key] = str(val).strip()
+            # Normalize structured fields.
+            for key, normalizer in (
+                ("size", _normalize_size),
+                ("weight", _normalize_weight),
+                ("volume", _normalize_volume),
+            ):
+                normed = normalizer(entry.get(key))
+                if normed:
+                    meta[key] = normed
+            # Parse selling_price to a string representation of the number.
+            price = _parse_price(entry.get("selling_price"))
+            if price is not None:
+                meta["selling_price"] = str(price)
             results.append(
                 DetectedItem(
                     method="visual",
@@ -311,20 +377,57 @@ class RealAIVisionPort:
             return []
         mime = _detect_mime(image)
         image_b64 = base64.b64encode(image).decode("ascii")
-        try:
-            raw_response = await self._provider.analyze(image_b64, mime)
-        except httpx.TimeoutException:
-            raise
-        except httpx.HTTPStatusError as exc:
-            logger.error(
-                "Vision provider HTTP error %s: %s",
-                exc.response.status_code,
-                exc.response.text[:200] if exc.response.text else "",
-            )
-            raise
-        except Exception:
-            logger.exception("Vision provider call failed")
-            raise
-        items = _parse_items(raw_response)
-        logger.info("Vision adapter returned %d detection(s)", len(items))
-        return items
+
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                raw_response = await self._provider.analyze(image_b64, mime)
+                items = _parse_items(raw_response)
+                logger.info("Vision adapter returned %d detection(s)", len(items))
+                return items
+            except httpx.HTTPStatusError as exc:
+                last_exc = exc
+                status = exc.response.status_code
+                if status == 429 or status >= 500:
+                    delay = min(
+                        _RETRY_BASE_DELAY_S * (2 ** attempt),
+                        _RETRY_MAX_DELAY_S,
+                    )
+                    # Respect Retry-After header from the provider if present.
+                    retry_after = exc.response.headers.get("retry-after")
+                    if retry_after:
+                        try:
+                            delay = max(delay, float(retry_after))
+                        except (ValueError, TypeError):
+                            pass
+                    logger.warning(
+                        "Vision API %s (attempt %d/%d), retrying in %.1fs",
+                        status, attempt + 1, _MAX_RETRIES, delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                # Non-retryable HTTP error (4xx except 429) — fail immediately.
+                logger.error(
+                    "Vision provider HTTP error %s: %s",
+                    status,
+                    exc.response.text[:200] if exc.response.text else "",
+                )
+                raise
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                delay = min(
+                    _RETRY_BASE_DELAY_S * (2 ** attempt),
+                    _RETRY_MAX_DELAY_S,
+                )
+                logger.warning(
+                    "Vision API timeout (attempt %d/%d), retrying in %.1fs",
+                    attempt + 1, _MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            except Exception:
+                logger.exception("Vision provider call failed")
+                raise
+
+        # All retries exhausted.
+        raise last_exc  # type: ignore[misc]

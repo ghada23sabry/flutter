@@ -46,6 +46,33 @@ class ScanSessionOut(BaseModel):
     completed_at: datetime | None
 
 
+class ConfirmScanResponse(BaseModel):
+    """Response from POST /ai/scans/{id}/confirm.
+
+    Extends ScanSessionOut with the authoritative count of products whose
+    inventory was actually mutated.  The client should use this count rather
+    than deriving it from pre-confirm reconciliation snapshots.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    store_id: uuid.UUID
+    shelf_id: uuid.UUID | None
+    status: ScanStatus
+    operation: ScanOperation
+    note: str | None
+    image_count: int
+    started_by: uuid.UUID | None
+    completed_by: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+    products_updated: int = 0
+    total_detections: int = 0
+    unmatched_detections: int = 0
+
+
 # ── Detections ───────────────────────────────────────────────────────────────
 
 

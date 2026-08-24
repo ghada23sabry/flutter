@@ -615,17 +615,39 @@ async def list_stock(
         query = query.where(Product.category_id == category_id)
     if product_status:
         query = query.where(Product.status == product_status)
-    query = query.order_by(Product.name.asc())
 
-    rows = (await db.execute(query)).all()
+    # Push stock_status filter to SQL when possible for large catalogs.
+    if stock_status == "out_of_stock":
+        query = query.where(
+            (Inventory.quantity == None) | (Inventory.quantity <= Decimal(0))
+        )
+    elif stock_status == "low_stock":
+        query = query.where(
+            Inventory.quantity.isnot(None),
+            Inventory.quantity > Decimal(0),
+            Inventory.quantity <= Product.reorder_point,
+        )
+    elif stock_status == "healthy":
+        query = query.where(
+            Inventory.quantity.isnot(None),
+            Inventory.quantity > Product.reorder_point,
+        )
+
+    # When no stock_status filter (or after SQL filter), count total via subquery
+    # for accurate pagination.
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar_one() or 0
+    rows = (
+        await db.execute(
+            query.order_by(Product.name.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
     nearest_map = await _nearest_expiry_map(db, ctx, store_id)
     items = [_inventory_out(p, inv, category_name, nearest_map.get(p.id)) for p, inv, category_name in rows]
-    if stock_status:
-        items = [it for it in items if it.stock_status == stock_status]
-    total = len(items)
     pages = (total + page_size - 1) // page_size if total else 0
-    start = (page - 1) * page_size
-    return Page[InventoryOut](items=items[start : start + page_size], total=total, page=page, page_size=page_size, pages=pages)
+    return Page[InventoryOut](items=items, total=total, page=page, page_size=page_size, pages=pages)
 
 
 @router.get("/stock/summary", response_model=InventorySummaryOut)

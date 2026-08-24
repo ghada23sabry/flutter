@@ -31,6 +31,7 @@ from app.core.errors import CODE_NOT_FOUND, CODE_VALIDATION_ERROR, AppError
 from app.core.security import AuthContext, require_permission
 from app.models import Product, ScanDetection, ScanReconciliation, ScanSession
 from app.schemas import (
+    ConfirmScanResponse,
     DetectionLink,
     DetectionOut,
     ReconciliationOut,
@@ -251,7 +252,7 @@ async def update_reconciliation_endpoint(
     return ReconciliationOut.model_validate(rec).model_copy(update={"product_name": product.name, "sku": product.sku})
 
 
-@router.post("/scans/{session_id}/confirm", response_model=ScanSessionOut)
+@router.post("/scans/{session_id}/confirm", response_model=ConfirmScanResponse)
 async def confirm_scan(
     session_id: uuid.UUID,
     ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_CONFIRM))],
@@ -259,11 +260,27 @@ async def confirm_scan(
     store_id: Annotated[uuid.UUID, Query()],
 ):
     require_store(ctx, store_id)
-    session = await confirm_scan_session(
+    result = await confirm_scan_session(
         db,
         tenant_id=ctx.tenant.id,
         store_id=store_id,
         session_id=session_id,
         actor_id=ctx.user.id,
     )
-    return ScanSessionOut.model_validate(session)
+    return ConfirmScanResponse(
+        id=result.session.id,
+        store_id=result.session.store_id,
+        shelf_id=result.session.shelf_id,
+        status=result.session.status,
+        operation=result.session.operation,
+        note=result.session.note,
+        image_count=result.session.image_count,
+        started_by=result.session.started_by,
+        completed_by=result.session.completed_by,
+        created_at=result.session.created_at,
+        updated_at=result.session.updated_at,
+        completed_at=result.session.completed_at,
+        products_updated=result.products_updated,
+        total_detections=result.total_detections,
+        unmatched_detections=result.unmatched_detections,
+    )

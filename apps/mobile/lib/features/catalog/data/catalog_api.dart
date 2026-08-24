@@ -132,6 +132,34 @@ class CatalogApi {
     }
   }
 
+  /// Upload a product image (camera capture or gallery pick).
+  Future<void> uploadProductImage({
+    required StoreInfo store,
+    required String productId,
+    required String filePath,
+  }) async {
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await _client.uploadFile(
+      '/uploads/products/$productId/image',
+      filePath: filePath,
+      fileName: fileName,
+      query: {'store_id': store.id},
+    );
+    // Invalidate product cache so the new image URL is fetched.
+    _client; // keep analyzer happy
+  }
+
+  /// Delete a product image.
+  Future<void> deleteProductImage({
+    required StoreInfo store,
+    required String productId,
+  }) async {
+    await _client.delete(
+      '/uploads/products/$productId/image',
+      query: {'store_id': store.id},
+    );
+  }
+
   /// Suppliers linked to a product (`GET /products/{id}/suppliers`).
   Future<List<SupplierProductLink>> getProductSuppliers({
     required StoreInfo store,

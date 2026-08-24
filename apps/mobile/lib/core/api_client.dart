@@ -109,6 +109,28 @@ class ApiClient {
     });
   }
 
+  /// Upload a file via multipart/form-data (for image uploads, etc.).
+  Future<Map<String, dynamic>> uploadFile(
+    String path, {
+    required String filePath,
+    required String fileName,
+    Map<String, dynamic>? query,
+  }) async {
+    return _requestWithRetry((token) async {
+      final uri = _uri(path, query);
+      final request = http.MultipartRequest('POST', uri);
+      if (token.isNotEmpty) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+      request.headers['Accept'] = 'application/json';
+      final file = await http.MultipartFile.fromPath('file', filePath, filename: fileName);
+      request.files.add(file);
+      final streamed = await _client.send(request);
+      final response = await http.Response.fromStream(streamed);
+      return _decode(response);
+    });
+  }
+
   /// Executes [fn] with the current [accessToken]. On a 401, invokes
   /// [onUnauthorized] to refresh the token, then retries [fn] exactly once.
   Future<T> _requestWithRetry<T>(Future<T> Function(String token) fn) async {
