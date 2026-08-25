@@ -41,6 +41,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   ProductStock? _stock;
   bool _loading = true;
   String? _error;
+  bool _hasInventoryChanges = false;
 
   @override
   void initState() {
@@ -87,6 +88,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     );
     if (result != null && mounted) {
       _stock = result;
+      _hasInventoryChanges = true;
       setState(() {});
     }
   }
@@ -103,6 +105,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     );
     if (result != null && mounted) {
       _stock = result;
+      _hasInventoryChanges = true;
       setState(() {});
     }
   }
@@ -121,11 +124,18 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_stock?.productName ?? widget.initialName ?? 'Stock'),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        Navigator.of(context).pop(_hasInventoryChanges);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(_stock?.productName ?? widget.initialName ?? 'Stock'),
+        ),
+        body: _buildBody(),
       ),
-      body: _buildBody(),
     );
   }
 

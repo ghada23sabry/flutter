@@ -1,18 +1,22 @@
 """Image upload router for product images."""
 import io
 import logging
+import mimetypes
 import uuid
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, UploadFile
+from fastapi.responses import FileResponse
 from PIL import Image
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.core.db import get_db
-from app.core.errors import CODE_VALIDATION_ERROR, AppError
+from app.core.errors import CODE_NOT_FOUND, CODE_VALIDATION_ERROR, AppError
 from app.core.security import AuthContext, require_permission
+from app.models.catalog import Product
 from app.schemas import ActionResponse
 from app.services.catalog_service import get_scoped_product
 
@@ -48,6 +52,38 @@ def _compress_image(raw: bytes, content_type: str) -> tuple[bytes, str]:
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
     return buf.getvalue(), "jpg"
+
+
+@router.get("/products/{product_id}/image")
+async def get_product_image(
+    product_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    """Serve a product's uploaded image. Store scoping prevents cross-tenant
+    access. No full auth required — image URLs are non-sensitive."""
+    product = (
+        await db.execute(
+            select(Product).where(
+                Product.id == product_id,
+                Product.store_id == store_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if product is None or not product.image_url:
+        raise AppError(CODE_NOT_FOUND, "Image not found", 404)
+
+    settings = get_settings()
+    upload_dir = Path(settings.upload_dir) / str(store_id)
+
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        filepath = upload_dir / f"{product_id}.{ext}"
+        if filepath.is_file():
+            media_type = mimetypes.guess_type(filepath.name)[0] or "image/jpeg"
+            return FileResponse(filepath, media_type=media_type)
+
+    raise AppError(CODE_NOT_FOUND, "Image file not found on disk", 404)
 
 
 @router.post("/products/{product_id}/image", response_model=ActionResponse)

@@ -111,6 +111,10 @@ class _AiCountScreenState extends State<AiCountScreen> {
   /// review decision.
   final Set<String> _overriddenReconciliationIds = {};
 
+  /// Set to true after a successful barcode-based stock mutation so the parent
+  /// screen (e.g. InventoryOverviewScreen) refreshes on pop.
+  bool _hasInventoryChanges = false;
+
   bool get _canScan => widget.session.hasPermission(Permissions.aiScan);
   bool get _canView => widget.session.hasPermission(Permissions.aiView);
   bool get _canReconcile =>
@@ -248,7 +252,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
   void _stepBack() {
     switch (_wizard) {
       case _AiWizardStep.operation:
-        Navigator.of(context).pop();
+        Navigator.of(context).pop(_hasInventoryChanges);
       case _AiWizardStep.zone:
         setState(() {
           _wizard = _AiWizardStep.operation;
@@ -261,7 +265,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
         });
       case _AiWizardStep.image:
         if (widget.initialOperation != null) {
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(_hasInventoryChanges);
         } else {
           setState(() {
             _wizard = _operation == AiScanOperation.count
@@ -650,6 +654,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
         reason: reason,
         movementType: movementType,
       );
+      _hasInventoryChanges = true;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -823,7 +828,7 @@ class _AiCountScreenState extends State<AiCountScreen> {
                   if (_state == AiScanUiState.idle) {
                     _stepBack();
                   } else {
-                    Navigator.of(context).pop();
+                    Navigator.of(context).pop(_hasInventoryChanges);
                   }
                 },
               )
