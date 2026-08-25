@@ -26,10 +26,31 @@ router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 PERMISSION_MANAGE = "products.manage"
 
-ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_EXTENSIONS = {"jpeg", "png", "webp", "gif"}
 
-MAX_DIMENSION = 1600
-JPEG_QUALITY = 85
+_MAX_DIMENSION = 1600
+_JPEG_QUALITY = 85
+
+# Magic-byte signatures for image format detection.
+_JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG"
+_WEBP_MAGIC = b"RIFF"
+_GIF_MAGIC = b"GIF8"
+
+
+def _detect_image_format(data: bytes) -> str | None:
+    """Detect image format from magic bytes. Returns extension ('jpeg', 'png', 'webp', 'gif') or None."""
+    if len(data) < 12:
+        return None
+    if data[:3] == _JPEG_MAGIC:
+        return "jpeg"
+    if data[:4] == _PNG_MAGIC:
+        return "png"
+    if data[:4] == _WEBP_MAGIC and data[8:12] == b"WEBP":
+        return "webp"
+    if data[:4] == _GIF_MAGIC:
+        return "gif"
+    return None
 
 
 def _ensure_upload_dir(store_id: uuid.UUID) -> Path:
@@ -39,18 +60,18 @@ def _ensure_upload_dir(store_id: uuid.UUID) -> Path:
     return upload_dir
 
 
-def _compress_image(raw: bytes, content_type: str) -> tuple[bytes, str]:
+def _compress_image(raw: bytes) -> tuple[bytes, str]:
     img = Image.open(io.BytesIO(raw))
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
 
     w, h = img.size
-    if max(w, h) > MAX_DIMENSION:
-        ratio = MAX_DIMENSION / max(w, h)
+    if max(w, h) > _MAX_DIMENSION:
+        ratio = _MAX_DIMENSION / max(w, h)
         img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
 
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    img.save(buf, format="JPEG", quality=_JPEG_QUALITY, optimize=True)
     return buf.getvalue(), "jpg"
 
 
@@ -94,13 +115,6 @@ async def upload_product_image(
     db: Annotated[AsyncSession, Depends(get_db)],
     store_id: Annotated[uuid.UUID, Query()],
 ):
-    if file.content_type not in ALLOWED_TYPES:
-        raise AppError(
-            CODE_VALIDATION_ERROR,
-            f"Unsupported image type: {file.content_type}. Allowed: jpeg, png, webp, gif",
-            422,
-        )
-
     settings = get_settings()
     max_bytes = settings.max_upload_size_mb * 1024 * 1024
     contents = await file.read()
@@ -111,9 +125,17 @@ async def upload_product_image(
             422,
         )
 
+    fmt = _detect_image_format(contents)
+    if fmt is None:
+        raise AppError(
+            CODE_VALIDATION_ERROR,
+            "Unsupported image format. Accepted: JPEG, PNG, WebP, GIF",
+            422,
+        )
+
     product = await get_scoped_product(db, ctx, store_id, product_id)
 
-    compressed, ext = _compress_image(contents, file.content_type)
+    compressed, ext = _compress_image(contents)
 
     upload_dir = _ensure_upload_dir(store_id)
 

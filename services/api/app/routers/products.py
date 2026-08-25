@@ -11,11 +11,14 @@ from app.core.audit import write_audit
 from app.core.barcode_enrichment import enrich_barcode_off
 from app.core.db import get_db
 from app.core.errors import CODE_CONFLICT, CODE_NOT_FOUND, AppError
+from app.core.product_discovery import discover_product
 from app.core.security import AuthContext, require_permission
 from app.models import Category, Product, Supplier, SupplierProduct
 from app.schemas import (
     BarcodeEnrichment,
     Page,
+    ProductCandidateOut,
+    ProductDiscoveryOut,
     ProductIn,
     ProductOut,
     ProductUpdate,
@@ -287,6 +290,46 @@ async def enrich_barcode(
         brand=off.brand,
         category=off.category,
         description=off.description,
+    )
+
+
+@router.get("/discover", response_model=ProductDiscoveryOut)
+async def discover_products(
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_VIEW))],
+    store_id: Annotated[uuid.UUID, Query()],
+    q: Annotated[str | None, Query(max_length=200)] = None,
+    barcode: Annotated[str | None, Query(max_length=64)] = None,
+    max_results: Annotated[int, Query(ge=1, le=10)] = 5,
+):
+    """Discover products from external sources (Open Food Facts).
+
+    Accepts a text query (name/brand) and/or barcode. Returns structured
+    candidates the client can present for review before creating a product.
+    Best-effort: returns empty candidates on failure, never errors.
+    """
+    require_store(ctx, store_id)
+    result = await discover_product(
+        name=q,
+        barcode=barcode,
+        max_results=max_results,
+    )
+    return ProductDiscoveryOut(
+        query=result.query,
+        source=result.source,
+        candidates=[
+            ProductCandidateOut(
+                name=c.name,
+                brand=c.brand,
+                category=c.category,
+                barcode=c.barcode,
+                description=c.description,
+                size=c.size,
+                image_url=c.image_url,
+                source=c.source,
+                confidence=c.confidence,
+            )
+            for c in result.candidates
+        ],
     )
 
 

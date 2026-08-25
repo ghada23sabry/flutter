@@ -572,3 +572,66 @@ class BarcodeEnrichment {
       category == null &&
       description == null;
 }
+
+/// A product candidate discovered from an external source (e.g. Open Food Facts).
+class ProductCandidate {
+  const ProductCandidate({
+    required this.name,
+    this.brand,
+    this.category,
+    this.barcode,
+    this.description,
+    this.size,
+    this.imageUrl,
+    this.source = 'open_food_facts',
+    this.confidence = 0.0,
+  });
+
+  factory ProductCandidate.fromJson(Map<String, dynamic> json) =>
+      ProductCandidate(
+        name: json['name'] as String? ?? '',
+        brand: json['brand'] as String?,
+        category: json['category'] as String?,
+        barcode: json['barcode'] as String?,
+        description: json['description'] as String?,
+        size: json['size'] as String?,
+        imageUrl: json['image_url'] as String?,
+        source: json['source'] as String? ?? 'open_food_facts',
+        confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
+      );
+
+  final String name;
+  final String? brand;
+  final String? category;
+  final String? barcode;
+  final String? description;
+  final String? size;
+  final String? imageUrl;
+  final String source;
+  final double confidence;
+}
+
+/// Response from the product discovery endpoint.
+class DiscoveryResult {
+  const DiscoveryResult({
+    required this.query,
+    this.source = 'open_food_facts',
+    this.candidates = const [],
+  });
+
+  factory DiscoveryResult.fromJson(Map<String, dynamic> json) =>
+      DiscoveryResult(
+        query: json['query'] as String? ?? '',
+        source: json['source'] as String? ?? 'open_food_facts',
+        candidates: [
+          for (final c in (json['candidates'] as List? ?? []))
+            ProductCandidate.fromJson(c as Map<String, dynamic>),
+        ],
+      );
+
+  final String query;
+  final String source;
+  final List<ProductCandidate> candidates;
+
+  bool get isEmpty => candidates.isEmpty;
+}

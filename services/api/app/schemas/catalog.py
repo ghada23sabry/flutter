@@ -236,3 +236,25 @@ class BarcodeEnrichment(BaseModel):
     description: str | None = None
     image_url: str | None = None
     quantity: str | None = None
+
+
+class ProductCandidateOut(BaseModel):
+    """A single product candidate discovered from an external source."""
+
+    name: str
+    brand: str | None = None
+    category: str | None = None
+    barcode: str | None = None
+    description: str | None = None
+    size: str | None = None
+    image_url: str | None = None
+    source: str = "open_food_facts"
+    confidence: float = 0.0
+
+
+class ProductDiscoveryOut(BaseModel):
+    """Response from the product discovery endpoint."""
+
+    query: str
+    source: str = "open_food_facts"
+    candidates: list[ProductCandidateOut] = Field(default_factory=list)

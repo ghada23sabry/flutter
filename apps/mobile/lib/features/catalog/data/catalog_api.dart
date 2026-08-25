@@ -132,6 +132,28 @@ class CatalogApi {
     }
   }
 
+  /// Discover products from external sources by name/brand text or barcode.
+  Future<DiscoveryResult> discoverProducts({
+    required StoreInfo store,
+    String? query,
+    String? barcode,
+    int maxResults = 5,
+  }) async {
+    try {
+      final params = <String, dynamic>{
+        'store_id': store.id,
+        'max_results': maxResults,
+      };
+      if (query != null && query.isNotEmpty) params['q'] = query;
+      if (barcode != null && barcode.isNotEmpty) params['barcode'] = barcode;
+      if (query == null && barcode == null) return const DiscoveryResult(query: '');
+      final json = await _client.get('/products/discover', query: params);
+      return DiscoveryResult.fromJson(json);
+    } on ApiException catch (_) {
+      return DiscoveryResult(query: query ?? barcode ?? '');
+    }
+  }
+
   /// Upload a product image (camera capture or gallery pick).
   Future<void> uploadProductImage({
     required StoreInfo store,

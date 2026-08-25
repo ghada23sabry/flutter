@@ -58,6 +58,28 @@ PERMISSION_CONFIRM = "ai.confirm"
 # Largest accepted scan-image payload (bytes). Images are never persisted.
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
+# Minimum image size (bytes) — anything smaller is almost certainly not a valid photo.
+_MIN_IMAGE_BYTES = 256
+
+# Magic-byte signatures for validating scan images before sending to the vision API.
+_JPEG_MAGIC = b"\xff\xd8\xff"
+_PNG_MAGIC = b"\x89PNG"
+_WEBP_MAGIC = b"RIFF"
+_GIF_MAGIC = b"GIF8"
+
+
+def _is_valid_image(data: bytes) -> bool:
+    """Check if raw bytes start with a recognized image magic-byte header."""
+    if len(data) < _MIN_IMAGE_BYTES:
+        return False
+    if data[:3] == _JPEG_MAGIC:
+        return True
+    if data[:4] == _PNG_MAGIC:
+        return True
+    if data[:4] == _WEBP_MAGIC and len(data) >= 12 and data[8:12] == b"WEBP":
+        return True
+    return data[:4] == _GIF_MAGIC
+
 
 def get_vision_port_dependency() -> AIVisionPort:
     """FastAPI dependency over the composition root (overridable in tests)."""
@@ -114,6 +136,13 @@ async def process_scan_endpoint(
     require_store(ctx, store_id)
     if len(image) > MAX_IMAGE_BYTES:
         raise AppError(CODE_VALIDATION_ERROR, "Scan image is too large", 422)
+    if not _is_valid_image(image):
+        raise AppError(
+            CODE_VALIDATION_ERROR,
+            "The uploaded file is not a valid image (JPEG, PNG, WebP, or GIF). "
+            "Capture a photo or scan a barcode instead.",
+            422,
+        )
     session = await process_scan(
         db,
         tenant_id=ctx.tenant.id,
