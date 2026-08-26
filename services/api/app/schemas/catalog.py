@@ -246,15 +246,37 @@ class ProductCandidateOut(BaseModel):
     category: str | None = None
     barcode: str | None = None
     description: str | None = None
+    variant: str | None = None
+    model_name: str | None = None
     size: str | None = None
+    weight: str | None = None
+    volume: str | None = None
     image_url: str | None = None
-    source: str = "open_food_facts"
+    source_url: str | None = None
+    manufacturer: str | None = None
+    sources: list[str] = Field(default_factory=list)
     confidence: float = 0.0
+    match_reason: str = ""
+
+
+class CategorySuggestionOut(BaseModel):
+    """Suggested category for a detected product."""
+
+    name: str
+    source: str = "ai_detected"
 
 
 class ProductDiscoveryOut(BaseModel):
-    """Response from the product discovery endpoint."""
+    """Response from the product discovery endpoint.
+
+    If has_confident_match is True, the first candidate is reliable enough
+    to auto-fill as the product identity. If False, all candidates are
+    "possible matches" and require explicit user selection.
+    """
 
     query: str
-    source: str = "open_food_facts"
+    sources_queried: list[str] = Field(default_factory=list)
     candidates: list[ProductCandidateOut] = Field(default_factory=list)
+    category_suggestion: CategorySuggestionOut | None = None
+    confidence_threshold: float = 0.65
+    has_confident_match: bool = False

@@ -459,7 +459,8 @@ async def test_failed_scan_confirmation_409(tenant_creds):
         async with client:
             created = await _create_scan(client, headers, tenant_creds)
             session_id = created.json()["id"]
-            processed = await _process_scan(client, headers, tenant_creds, session_id, content=b"x")
+            valid_image = _image(_barcode_item(BARCODE_A, 3))
+            processed = await _process_scan(client, headers, tenant_creds, session_id, content=valid_image)
             assert processed.status_code == 500, processed.text
             assert processed.json()["detail"]["code"] == "INTERNAL_ERROR"
             assert await _session_status(session_id) == "failed"
@@ -656,7 +657,8 @@ async def test_oversized_image_rejected_422(tenant_creds, monkeypatch):
 async def test_process_unknown_session_404(tenant_creds):
     client, headers = await _authed_client(tenant_creds)
     async with client:
-        resp = await _process_scan(client, headers, tenant_creds, uuid.uuid4())
+        valid_image = _image(_barcode_item(BARCODE_A, 1))
+        resp = await _process_scan(client, headers, tenant_creds, uuid.uuid4(), content=valid_image)
     assert resp.status_code == 404
     assert resp.json()["detail"]["code"] == "NOT_FOUND"
 

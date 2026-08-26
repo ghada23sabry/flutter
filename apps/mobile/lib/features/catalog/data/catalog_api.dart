@@ -132,11 +132,16 @@ class CatalogApi {
     }
   }
 
-  /// Discover products from external sources by name/brand text or barcode.
+  /// Discover products from multiple extensible sources.
   Future<DiscoveryResult> discoverProducts({
     required StoreInfo store,
     String? query,
     String? barcode,
+    String? brand,
+    String? category,
+    String? ocrText,
+    String? variant,
+    String? modelName,
     int maxResults = 5,
   }) async {
     try {
@@ -146,7 +151,18 @@ class CatalogApi {
       };
       if (query != null && query.isNotEmpty) params['q'] = query;
       if (barcode != null && barcode.isNotEmpty) params['barcode'] = barcode;
-      if (query == null && barcode == null) return const DiscoveryResult(query: '');
+      if (brand != null && brand.isNotEmpty) params['brand'] = brand;
+      if (category != null && category.isNotEmpty) {
+        params['category'] = category;
+      }
+      if (ocrText != null && ocrText.isNotEmpty) params['ocr_text'] = ocrText;
+      if (variant != null && variant.isNotEmpty) params['variant'] = variant;
+      if (modelName != null && modelName.isNotEmpty) {
+        params['model_name'] = modelName;
+      }
+      if (query == null && barcode == null) {
+        return const DiscoveryResult(query: '');
+      }
       final json = await _client.get('/products/discover', query: params);
       return DiscoveryResult.fromJson(json);
     } on ApiException catch (_) {

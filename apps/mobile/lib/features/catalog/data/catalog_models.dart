@@ -581,10 +581,17 @@ class ProductCandidate {
     this.category,
     this.barcode,
     this.description,
+    this.variant,
+    this.modelName,
     this.size,
+    this.weight,
+    this.volume,
     this.imageUrl,
-    this.source = 'open_food_facts',
+    this.sourceUrl,
+    this.manufacturer,
+    this.sources = const [],
     this.confidence = 0.0,
+    this.matchReason = '',
   });
 
   factory ProductCandidate.fromJson(Map<String, dynamic> json) =>
@@ -594,10 +601,19 @@ class ProductCandidate {
         category: json['category'] as String?,
         barcode: json['barcode'] as String?,
         description: json['description'] as String?,
+        variant: json['variant'] as String?,
+        modelName: json['model_name'] as String?,
         size: json['size'] as String?,
+        weight: json['weight'] as String?,
+        volume: json['volume'] as String?,
         imageUrl: json['image_url'] as String?,
-        source: json['source'] as String? ?? 'open_food_facts',
+        sourceUrl: json['source_url'] as String?,
+        manufacturer: json['manufacturer'] as String?,
+        sources: [
+          for (final s in (json['sources'] as List? ?? [])) s as String,
+        ],
         confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
+        matchReason: json['match_reason'] as String? ?? '',
       );
 
   final String name;
@@ -605,33 +621,78 @@ class ProductCandidate {
   final String? category;
   final String? barcode;
   final String? description;
+  final String? variant;
+  final String? modelName;
   final String? size;
+  final String? weight;
+  final String? volume;
   final String? imageUrl;
-  final String source;
+  final String? sourceUrl;
+  final String? manufacturer;
+  final List<String> sources;
   final double confidence;
+  final String matchReason;
+
+  String get primarySource =>
+      sources.isNotEmpty ? sources.first : 'unknown';
+}
+
+class CategorySuggestion {
+  const CategorySuggestion({
+    required this.name,
+    this.source = 'ai_detected',
+  });
+
+  factory CategorySuggestion.fromJson(Map<String, dynamic> json) =>
+      CategorySuggestion(
+        name: json['name'] as String? ?? '',
+        source: json['source'] as String? ?? 'ai_detected',
+      );
+
+  final String name;
+  final String source;
 }
 
 /// Response from the product discovery endpoint.
 class DiscoveryResult {
   const DiscoveryResult({
     required this.query,
-    this.source = 'open_food_facts',
+    this.sourcesQueried = const [],
     this.candidates = const [],
+    this.categorySuggestion,
+    this.confidenceThreshold = 0.65,
+    this.hasConfidentMatch = false,
   });
 
   factory DiscoveryResult.fromJson(Map<String, dynamic> json) =>
       DiscoveryResult(
         query: json['query'] as String? ?? '',
-        source: json['source'] as String? ?? 'open_food_facts',
+        sourcesQueried: [
+          for (final s in (json['sources_queried'] as List? ?? []))
+            s as String,
+        ],
         candidates: [
           for (final c in (json['candidates'] as List? ?? []))
             ProductCandidate.fromJson(c as Map<String, dynamic>),
         ],
+        categorySuggestion: json['category_suggestion'] != null
+            ? CategorySuggestion.fromJson(
+                json['category_suggestion'] as Map<String, dynamic>)
+            : null,
+        confidenceThreshold:
+            (json['confidence_threshold'] as num?)?.toDouble() ?? 0.65,
+        hasConfidentMatch: json['has_confident_match'] as bool? ?? false,
       );
 
   final String query;
-  final String source;
+  final List<String> sourcesQueried;
   final List<ProductCandidate> candidates;
+  final CategorySuggestion? categorySuggestion;
+  final double confidenceThreshold;
+  final bool hasConfidentMatch;
 
   bool get isEmpty => candidates.isEmpty;
+
+  bool isCandidateConfident(ProductCandidate c) =>
+      c.confidence >= confidenceThreshold;
 }

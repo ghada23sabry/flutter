@@ -7,15 +7,17 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.discovery import DiscoveryQuery, discover_from_all_providers
 from app.core.audit import write_audit
 from app.core.barcode_enrichment import enrich_barcode_off
 from app.core.db import get_db
 from app.core.errors import CODE_CONFLICT, CODE_NOT_FOUND, AppError
-from app.core.product_discovery import discover_product
 from app.core.security import AuthContext, require_permission
 from app.models import Category, Product, Supplier, SupplierProduct
 from app.schemas import (
     BarcodeEnrichment,
+    CategoryIn,
+    CategoryOut,
     Page,
     ProductCandidateOut,
     ProductDiscoveryOut,
@@ -32,6 +34,11 @@ from app.services.catalog_service import (
     get_scoped_product,
     normalize_barcode,
     require_store,
+)
+from app.services.category_service import (
+    create_category_if_accepted,
+    find_best_matching_category,
+    suggest_category_name,
 )
 from app.services.sku_service import generate_sku, get_or_create_sku_setting
 
@@ -296,26 +303,67 @@ async def enrich_barcode(
 @router.get("/discover", response_model=ProductDiscoveryOut)
 async def discover_products(
     ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_VIEW))],
+    db: Annotated[AsyncSession, Depends(get_db)],
     store_id: Annotated[uuid.UUID, Query()],
     q: Annotated[str | None, Query(max_length=200)] = None,
     barcode: Annotated[str | None, Query(max_length=64)] = None,
+    brand: Annotated[str | None, Query(max_length=200)] = None,
+    category: Annotated[str | None, Query(max_length=200)] = None,
+    ocr_text: Annotated[str | None, Query(max_length=500)] = None,
+    variant: Annotated[str | None, Query(max_length=200)] = None,
+    model_name: Annotated[str | None, Query(max_length=200)] = None,
     max_results: Annotated[int, Query(ge=1, le=10)] = 5,
 ):
-    """Discover products from external sources (Open Food Facts).
+    """Discover products from multiple extensible sources.
 
-    Accepts a text query (name/brand) and/or barcode. Returns structured
-    candidates the client can present for review before creating a product.
-    Best-effort: returns empty candidates on failure, never errors.
+    Intelligently routes queries to appropriate providers based on product
+    domain: Open Food Facts for food/beverage, Open Beauty Facts for
+    cosmetics/personal care, Wikidata+Wikipedia for general products
+    (electronics, tools, appliances, household, etc.).
+
+    Accepts text query, barcode, brand, category, OCR text, model name,
+    and variant parameters. Returns structured candidates ranked by
+    confidence with source attribution and match reasons.
+
+    Also provides a category suggestion based on the detected product info.
     """
     require_store(ctx, store_id)
-    result = await discover_product(
+    query = DiscoveryQuery(
         name=q,
+        brand=brand or q,
         barcode=barcode,
-        max_results=max_results,
+        category=category,
+        ocr_text=ocr_text,
+        variant=variant,
+        model_name=model_name,
     )
+    discovery = await discover_from_all_providers(query, max_results=max_results)
+
+    # Category intelligence: match existing or suggest new
+    # Use discovered product info to improve suggestion
+    cat_suggestion = None
+    cat_text = category
+    if not cat_text and discovery.candidates:
+        cat_text = discovery.candidates[0].category
+    best_cat_name = suggest_category_name(
+        product_name=q or (discovery.candidates[0].name if discovery.candidates else None),
+        category_text=cat_text,
+    )
+    if best_cat_name:
+        existing_cat = await find_best_matching_category(
+            db,
+            tenant_id=ctx.tenant.id,
+            store_id=store_id,
+            category_text=best_cat_name,
+        )
+        if existing_cat is not None:
+            cat_suggestion = {"name": existing_cat.name, "source": "existing"}
+        else:
+            cat_suggestion = {"name": best_cat_name, "source": "suggested"}
+
     return ProductDiscoveryOut(
-        query=result.query,
-        source=result.source,
+        query=discovery.query,
+        sources_queried=discovery.sources_queried,
         candidates=[
             ProductCandidateOut(
                 name=c.name,
@@ -323,14 +371,47 @@ async def discover_products(
                 category=c.category,
                 barcode=c.barcode,
                 description=c.description,
+                variant=c.variant,
+                model_name=c.model_name,
                 size=c.size,
+                weight=c.weight,
+                volume=c.volume,
                 image_url=c.image_url,
-                source=c.source,
+                source_url=c.source_url,
+                manufacturer=c.manufacturer,
+                sources=c.sources,
                 confidence=c.confidence,
+                match_reason=c.match_reason,
             )
-            for c in result.candidates
+            for c in discovery.candidates
         ],
+        category_suggestion=cat_suggestion,
+        confidence_threshold=discovery.confidence_threshold,
+        has_confident_match=discovery.has_confident_match,
     )
+
+
+@router.post("/categories/create", response_model=CategoryOut, status_code=201)
+async def create_category_inline(
+    body: CategoryIn,
+    ctx: Annotated[AuthContext, Depends(require_permission(PERMISSION_MANAGE))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    store_id: Annotated[uuid.UUID, Query()],
+):
+    """Create a category inline from the unknown product flow.
+
+    Checks for near-duplicates (case-insensitive name) before creating.
+    Returns the new or existing category.
+    """
+    require_store(ctx, store_id)
+    category = await create_category_if_accepted(
+        db,
+        tenant_id=ctx.tenant.id,
+        store_id=store_id,
+        category_name=body.name,
+        actor_id=ctx.user.id,
+    )
+    return category
 
 
 @router.get("/{product_id}", response_model=ProductOut)

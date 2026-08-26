@@ -1,3 +1,4 @@
+import os
 import uuid
 
 import httpx
@@ -5,10 +6,19 @@ import pytest
 from httpx import ASGITransport
 from sqlalchemy import delete, select
 
+from app.config import get_settings
 from app.core.db import SessionLocal, engine
 from app.core.security import hash_password
 from app.main import app
 from app.models import Role, Store, Tenant, User, UserRole
+
+# Ensure tests always have a valid SECRET_KEY regardless of .env state.
+# This is a test-only value; production validation remains strict.
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production-use-only-32bytes!!")
+os.environ.setdefault("ENVIRONMENT", "development")
+
+# Clear cached settings so the new env vars take effect.
+get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)

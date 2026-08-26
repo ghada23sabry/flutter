@@ -5,10 +5,11 @@
 /// create a new product in the catalog.
 ///
 /// Enhanced with:
-/// - Automatic external product discovery (Open Food Facts text search)
-/// - Candidate selection with one-tap pre-fill
-/// - Category picker (loads store categories from backend)
-/// - Supplier association (loads tenant suppliers from backend)
+/// - Multi-source external product discovery (provider-based architecture)
+/// - Candidate selection with source attribution and match reasons
+/// - Category intelligence: match existing or suggest new with inline creation
+/// - Supplier picker with inline creation (no leaving the flow)
+/// - Discovery confidence with overall score
 library;
 
 import 'package:flutter/material.dart';
@@ -92,6 +93,16 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   late final TextEditingController _weightCtrl;
   late final TextEditingController _volumeCtrl;
 
+  // Inline category creation
+  late final TextEditingController _newCategoryCtrl;
+  bool _showNewCategory = false;
+
+  // Inline supplier creation
+  late final TextEditingController _newSupplierNameCtrl;
+  late final TextEditingController _newSupplierContactCtrl;
+  late final TextEditingController _newSupplierPhoneCtrl;
+  bool _showNewSupplier = false;
+
   bool _saving = false;
   bool _discovering = false;
   String? _error;
@@ -99,11 +110,16 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   List<ProductCandidate> _candidates = [];
   String? _selectedCategoryId;
   String? _selectedSupplierId;
+  DiscoveryResult? _discoveryResult;
 
   List<Category> _categories = [];
   bool _categoriesLoading = false;
   List<Supplier> _suppliers = [];
   bool _suppliersLoading = false;
+
+  // Category suggestion from backend
+  CategorySuggestion? _categorySuggestion;
+  bool _showCategorySuggestion = false;
 
   @override
   void initState() {
@@ -120,6 +136,11 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     _sizeCtrl = TextEditingController(text: d.size ?? '');
     _weightCtrl = TextEditingController(text: d.weight ?? '');
     _volumeCtrl = TextEditingController(text: d.volume ?? '');
+
+    _newCategoryCtrl = TextEditingController();
+    _newSupplierNameCtrl = TextEditingController();
+    _newSupplierContactCtrl = TextEditingController();
+    _newSupplierPhoneCtrl = TextEditingController();
 
     _loadCategories();
     _loadSuppliers();
@@ -170,12 +191,30 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
         store: widget.store,
         query: [d.brand, d.name].where((e) => e != null && e.isNotEmpty).join(' '),
         barcode: d.barcode,
+        brand: d.brand,
+        category: d.category,
+        ocrText: null,
+        variant: d.variant,
+        modelName: d.modelName,
       );
       if (!mounted) return;
       setState(() {
+        _discoveryResult = result;
         _candidates = result.candidates;
+        _categorySuggestion = result.categorySuggestion;
         _discovering = false;
       });
+      // Auto-apply category suggestion if no existing category is selected
+      if (_categorySuggestion != null &&
+          _categorySuggestion!.source == 'existing' &&
+          _selectedCategoryId == null) {
+        _applyCategorySuggestion(_categorySuggestion!);
+      }
+      // Show suggestion banner if it's a new category
+      if (_categorySuggestion != null &&
+          _categorySuggestion!.source == 'suggested') {
+        setState(() => _showCategorySuggestion = true);
+      }
     } catch (_) {
       if (mounted) setState(() => _discovering = false);
     }
@@ -192,6 +231,15 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
         _descCtrl.text = c.description!;
       }
       if (c.size != null && c.size!.isNotEmpty) _sizeCtrl.text = c.size!;
+      if (c.weight != null && c.weight!.isNotEmpty) {
+        _weightCtrl.text = c.weight!;
+      }
+      if (c.volume != null && c.volume!.isNotEmpty) {
+        _volumeCtrl.text = c.volume!;
+      }
+      if (c.variant != null && c.variant!.isNotEmpty) {
+        _variantCtrl.text = c.variant!;
+      }
       if (c.category != null && c.category!.isNotEmpty) {
         _matchCategory(c.category!);
       }
@@ -210,6 +258,74 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     }
   }
 
+  void _applyCategorySuggestion(CategorySuggestion suggestion) {
+    for (final cat in _categories) {
+      if (cat.name.toLowerCase() == suggestion.name.toLowerCase()) {
+        _selectedCategoryId = cat.id;
+        return;
+      }
+    }
+  }
+
+  Future<void> _createInlineCategory() async {
+    final name = _newCategoryCtrl.text.trim();
+    if (name.isEmpty) return;
+
+    setState(() => _error = null);
+    try {
+      final category = await widget.catalogApi.createCategory(
+        store: widget.store,
+        input: CategoryInput(name: name),
+      );
+      if (!mounted) return;
+      await _loadCategories();
+      if (!mounted) return;
+      setState(() {
+        _selectedCategoryId = category.id;
+        _showNewCategory = false;
+        _newCategoryCtrl.clear();
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Failed to create category: $e');
+      }
+    }
+  }
+
+  Future<void> _createInlineSupplier() async {
+    final name = _newSupplierNameCtrl.text.trim();
+    if (name.isEmpty) return;
+
+    setState(() => _error = null);
+    try {
+      final supplier = await widget.catalogApi.createSupplier(
+        input: SupplierInput(
+          name: name,
+          contactName: _newSupplierContactCtrl.text.trim().isNotEmpty
+              ? _newSupplierContactCtrl.text.trim()
+              : null,
+          phone: _newSupplierPhoneCtrl.text.trim().isNotEmpty
+              ? _newSupplierPhoneCtrl.text.trim()
+              : null,
+        ),
+      );
+      if (!mounted) return;
+      await _loadSuppliers();
+      if (!mounted) return;
+      setState(() {
+        _selectedSupplierId = supplier.id;
+        _showNewSupplier = false;
+        _newSupplierNameCtrl.clear();
+        _newSupplierContactCtrl.clear();
+        _newSupplierPhoneCtrl.clear();
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Failed to create supplier: $e');
+      }
+    }
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -223,6 +339,10 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     _sizeCtrl.dispose();
     _weightCtrl.dispose();
     _volumeCtrl.dispose();
+    _newCategoryCtrl.dispose();
+    _newSupplierNameCtrl.dispose();
+    _newSupplierContactCtrl.dispose();
+    _newSupplierPhoneCtrl.dispose();
     super.dispose();
   }
 
@@ -315,6 +435,10 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           _buildStatusBanner(scheme),
+          if (_showCategorySuggestion && _categorySuggestion != null) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _buildCategorySuggestionBanner(scheme),
+          ],
           if (_candidates.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.lg),
             _buildDiscoverySection(scheme),
@@ -375,7 +499,7 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: AppButton(
-                  label: _saving ? 'Creating…' : 'Create Product',
+                  label: _saving ? 'Creating\u2026' : 'Create Product',
                   icon: Icons.add,
                   expand: false,
                   onPressed: _saving ? null : _createProduct,
@@ -415,9 +539,11 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
                 Expanded(
                   child: Text(
                     isDiscovering
-                        ? 'Searching product databases…'
+                        ? 'Searching product databases\u2026'
                         : hasCandidates
-                            ? 'Found ${_candidates.length} similar product(s) below. Tap one to pre-fill, or fill manually.'
+                            ? (_discoveryResult?.hasConfidentMatch ?? false)
+                                ? 'Found a confident match. Tap to pre-fill, or choose another below.'
+                                : 'Found ${_candidates.length} possible match(es). Review and tap one to pre-fill, or fill manually.'
                             : 'This product was not found in your catalog. '
                                 'Review the detected information and create it.',
                     style: Theme.of(context).textTheme.bodyMedium,
@@ -438,6 +564,69 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     );
   }
 
+  Widget _buildCategorySuggestionBanner(ColorScheme scheme) {
+    final suggestion = _categorySuggestion!;
+    return AppCard(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
+          children: [
+            Icon(Icons.lightbulb_outline, color: Colors.amber[700], size: 20),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Suggested category: ${suggestion.name}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                  ),
+                  Text(
+                    'Tap to create this category, or choose an existing one below.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () async {
+                await _createInlineCategoryWithName(suggestion.name);
+                if (mounted) setState(() => _showCategorySuggestion = false);
+              },
+              child: const Text('Create'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () => setState(() => _showCategorySuggestion = false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createInlineCategoryWithName(String name) async {
+    setState(() => _error = null);
+    try {
+      final category = await widget.catalogApi.createCategory(
+        store: widget.store,
+        input: CategoryInput(name: name),
+      );
+      if (!mounted) return;
+      await _loadCategories();
+      if (!mounted) return;
+      setState(() => _selectedCategoryId = category.id);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _error = 'Failed to create category: $e');
+      }
+    }
+  }
+
   Widget _buildDiscoveringIndicator(ColorScheme scheme) {
     return AppCard(
       child: Padding(
@@ -451,7 +640,7 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
             ),
             const SizedBox(width: AppSpacing.md),
             Text(
-              'Searching Open Food Facts…',
+              'Searching product databases\u2026',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -463,119 +652,259 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   }
 
   Widget _buildDiscoverySection(ColorScheme scheme) {
+    final result = _discoveryResult;
+    final hasConfident = result?.hasConfidentMatch ?? false;
+    final bestMatch = _candidates.isNotEmpty ? _candidates.first : null;
+    final otherMatches = _candidates.length > 1 ? _candidates.sublist(1) : <ProductCandidate>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'External matches',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        for (final c in _candidates)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: AppCard(
-              onTap: () => _applyCandidate(c),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: Row(
-                  children: [
-                    if (c.imageUrl != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: Image.network(
-                          c.imageUrl!,
-                          width: 40,
-                          height: 40,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.image_not_supported_outlined,
-                            size: 40,
-                          ),
-                        ),
-                      )
-                    else
-                      Icon(Icons.inventory_2_outlined, color: scheme.primary),
-                    const SizedBox(width: AppSpacing.md),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            c.name,
-                            style: Theme.of(context).textTheme.bodyLarge,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          if (c.brand != null)
-                            Text(
-                              c.brand!,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                            ),
-                          if (c.category != null)
-                            Text(
-                              c.category!,
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Column(
-                      children: [
-                        Icon(Icons.arrow_forward_ios, size: 14, color: scheme.primary),
-                        Text(
-                          '${(c.confidence * 100).round()}%',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: scheme.primary,
-                              ),
-                        ),
-                      ],
-                    ),
-                  ],
+        if (hasConfident && bestMatch != null) ...[
+          Text(
+            'Best Match',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w600,
                 ),
-              ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _buildCandidateCard(scheme, bestMatch, isBest: true),
+        ],
+        if (!hasConfident && _candidates.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.sm),
+            decoration: BoxDecoration(
+              color: scheme.errorContainer.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, size: 16, color: scheme.error),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    'No confident match found. Please review and select the best option below.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.error),
+                  ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Possible Matches',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final c in _candidates)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: _buildCandidateCard(scheme, c),
+            ),
+        ],
+        if (hasConfident && otherMatches.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            'Other Matches',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final c in otherMatches)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: _buildCandidateCard(scheme, c),
+            ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildCandidateCard(ColorScheme scheme, ProductCandidate c, {bool isBest = false}) {
+    return AppCard(
+      onTap: () => _applyCandidate(c),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Row(
+          children: [
+            if (c.imageUrl != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.network(
+                  c.imageUrl!,
+                  width: isBest ? 56 : 40,
+                  height: isBest ? 56 : 40,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Icon(
+                    Icons.image_not_supported_outlined,
+                    size: isBest ? 56 : 40,
+                  ),
+                ),
+              )
+            else
+              Icon(Icons.inventory_2_outlined, color: scheme.primary, size: isBest ? 28 : 20),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          c.name,
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                fontWeight: isBest ? FontWeight.w600 : null,
+                              ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (c.sources.isNotEmpty)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final s in c.sources.take(3))
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: _SourceBadge(source: s),
+                              ),
+                          ],
+                        ),
+                    ],
+                  ),
+                  if (c.brand != null)
+                    Text(
+                      c.brand!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                    ),
+                  if (c.modelName != null && c.modelName!.isNotEmpty)
+                    Text(
+                      'Model: ${c.modelName}',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontFamily: 'monospace',
+                          ),
+                    ),
+                  if (c.category != null)
+                    Text(
+                      c.category!,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  if (c.matchReason.isNotEmpty)
+                    Text(
+                      c.matchReason,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: scheme.primary,
+                            fontStyle: FontStyle.italic,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Column(
+              children: [
+                Icon(
+                  isBest ? Icons.star : Icons.arrow_forward_ios,
+                  size: isBest ? 18 : 14,
+                  color: scheme.primary,
+                ),
+                Text(
+                  '${(c.confidence * 100).round()}%',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: isBest ? FontWeight.w700 : null,
+                      ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildCategoryPicker(ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: DropdownButtonFormField<String>(
-        initialValue: _selectedCategoryId,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: 'Category',
-          prefixIcon: const Icon(Icons.category_outlined, size: 20),
-          border: const OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: _categoriesLoading
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CircularProgressIndicator(strokeWidth: 2),
+      child: Column(
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selectedCategoryId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Category',
+              prefixIcon: const Icon(Icons.category_outlined, size: 20),
+              border: const OutlineInputBorder(),
+              isDense: true,
+              suffixIcon: _categoriesLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : null,
+            ),
+            items: [
+              for (final cat in _categories)
+                DropdownMenuItem(value: cat.id, child: Text(cat.name)),
+            ],
+            onChanged: (value) => setState(() => _selectedCategoryId = value),
+          ),
+          if (_showNewCategory) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _newCategoryCtrl,
+                    decoration: const InputDecoration(
+                      hintText: 'New category name',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                      prefixIcon: Icon(Icons.add, size: 20),
+                    ),
+                    autofocus: true,
+                    onSubmitted: (_) => _createInlineCategory(),
                   ),
-                )
-              : null,
-        ),
-        items: [
-          for (final cat in _categories)
-            DropdownMenuItem(value: cat.id, child: Text(cat.name)),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                IconButton(
+                  icon: const Icon(Icons.check, size: 20),
+                  onPressed: _createInlineCategory,
+                  color: scheme.primary,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20),
+                  onPressed: () => setState(() {
+                    _showNewCategory = false;
+                    _newCategoryCtrl.clear();
+                  }),
+                ),
+              ],
+            ),
+          ] else
+            TextButton.icon(
+              onPressed: () => setState(() => _showNewCategory = true),
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('New category'),
+            ),
         ],
-        onChanged: (value) => setState(() => _selectedCategoryId = value),
       ),
     );
   }
@@ -583,30 +912,72 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
   Widget _buildSupplierPicker(ColorScheme scheme) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: DropdownButtonFormField<String>(
-        initialValue: _selectedSupplierId,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: 'Supplier (optional)',
-          prefixIcon: const Icon(Icons.local_shipping_outlined, size: 20),
-          border: const OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: _suppliersLoading
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: Padding(
-                    padding: EdgeInsets.all(12),
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : null,
-        ),
-        items: [
-          for (final s in _suppliers)
-            DropdownMenuItem(value: s.id, child: Text(s.name)),
+      child: Column(
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selectedSupplierId,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Supplier (optional)',
+              prefixIcon: const Icon(Icons.local_shipping_outlined, size: 20),
+              border: const OutlineInputBorder(),
+              isDense: true,
+              suffixIcon: _suppliersLoading
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : null,
+            ),
+            items: [
+              for (final s in _suppliers)
+                DropdownMenuItem(value: s.id, child: Text(s.name)),
+            ],
+            onChanged: (value) => setState(() => _selectedSupplierId = value),
+          ),
+          if (_showNewSupplier) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _buildField(_newSupplierNameCtrl, 'Supplier Name *', Icons.business, key: const Key('new_supplier_name')),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildField(_newSupplierContactCtrl, 'Contact', Icons.person, key: const Key('new_supplier_contact')),
+                ),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: _buildField(_newSupplierPhoneCtrl, 'Phone', Icons.phone, key: const Key('new_supplier_phone')),
+                ),
+              ],
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: _createInlineSupplier,
+                  child: const Text('Create Supplier'),
+                ),
+                TextButton(
+                  onPressed: () => setState(() {
+                    _showNewSupplier = false;
+                    _newSupplierNameCtrl.clear();
+                    _newSupplierContactCtrl.clear();
+                    _newSupplierPhoneCtrl.clear();
+                  }),
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ] else
+            TextButton.icon(
+              onPressed: () => setState(() => _showNewSupplier = true),
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('New supplier'),
+            ),
         ],
-        onChanged: (value) => setState(() => _selectedSupplierId = value),
       ),
     );
   }
@@ -617,10 +988,12 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
     IconData icon, {
     int maxLines = 1,
     TextInputType? keyboardType,
+    Key? key,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: TextField(
+        key: key,
         controller: ctrl,
         maxLines: maxLines,
         keyboardType: keyboardType,
@@ -635,5 +1008,68 @@ class _UnknownProductScreenState extends State<UnknownProductScreen> {
         ),
       ),
     );
+  }
+}
+
+/// Small badge showing the data source of a discovery candidate.
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.source});
+
+  final String source;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _sourceLabel(source);
+    final color = _sourceColor(source);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(3),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 8,
+            ),
+      ),
+    );
+  }
+
+  String _sourceLabel(String source) {
+    switch (source) {
+      case 'open_food_facts':
+        return 'OFF';
+      case 'open_beauty_facts':
+        return 'OBF';
+      case 'general_product':
+        return 'WIKI';
+      case 'ai_detected':
+        return 'AI';
+      case 'user_entered':
+        return 'Manual';
+      default:
+        return source.length > 6 ? source.substring(0, 6) : source;
+    }
+  }
+
+  Color _sourceColor(String source) {
+    switch (source) {
+      case 'open_food_facts':
+        return Colors.green;
+      case 'open_beauty_facts':
+        return Colors.purple;
+      case 'general_product':
+        return Colors.blue;
+      case 'ai_detected':
+        return Colors.teal;
+      case 'user_entered':
+        return Colors.orange;
+      default:
+        return Colors.grey;
+    }
   }
 }
